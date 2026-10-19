@@ -14,6 +14,7 @@ import {
 } from '../activity-log/schemas/activity-log.schema.js';
 import { ActivityService } from '../activity/activity.service.js';
 import { File } from '../files/schemas/file.schema.js';
+import { AccessService, EffectiveAccess } from '../shares/access.service.js';
 import { CreateFolderDto } from './dto/create-folder.dto.js';
 import { MoveFolderDto } from './dto/move-folder.dto.js';
 import { RenameFolderDto } from './dto/rename-folder.dto.js';
@@ -33,9 +34,11 @@ const MAX_DEPTH = 100;
  * - La cadena nunca contiene a la propia carpeta, así que no puede haber ciclos.
  * - Una carpeta solo puede vivir dentro de un árbol de su mismo `ownerId`.
  *
- * Todas las operaciones se filtran siempre por `ownerId`. Una carpeta de otro
- * usuario se trata como inexistente (404), nunca como prohibida (403), para no
- * revelar que existe.
+ * Las operaciones estructurales (crear, mover, eliminar) se filtran siempre por
+ * `ownerId`. Listar y renombrar aceptan además shares: `READ` para listar el
+ * contenido y `EDIT` para renombrar, resueltos por `AccessService`. Una carpeta
+ * sin acceso se trata como inexistente (404), nunca como prohibida (403), para
+ * no revelar que existe.
  */
 @Injectable()
 export class FoldersService {
@@ -47,6 +50,7 @@ export class FoldersService {
     @InjectModel(File.name)
     private readonly fileModel: Model<File>,
     private readonly activityService: ActivityService,
+    private readonly accessService: AccessService,
   ) {}
 
   /** Crea una carpeta en la raíz o dentro de un padre activo del mismo dueño. */
@@ -122,24 +126,24 @@ export class FoldersService {
     parentId?: string,
   ): Promise<FolderDocument[]> {
     const owner = new Types.ObjectId(ownerId);
-    const filter: QueryFilter<Folder> = {
-      ownerId: owner,
-      isDeleted: false,
-    };
+    const filter: QueryFilter<Folder> = { isDeleted: false };
 
     if (parentId) {
       if (!Types.ObjectId.isValid(parentId)) {
         throw new BadRequestException('parentId debe ser un ObjectId válido');
       }
-      // Se valida el padre para que una carpeta de otro usuario (o en
-      // papelera) devuelva 404 en lugar de una lista vacía ambigua.
-      const parent = await this.findOwnedActiveFolder(
+      // Un invitado con READ+ puede listar las subcarpetas de una carpeta
+      // compartida. Sin acceso se responde 404, igual que si no existiera.
+      const { resource: parent } = await this.accessService.requireFolderAccess(
+        ownerId,
         parentId,
-        owner,
-        'Carpeta padre no encontrada',
+        EffectiveAccess.READ,
       );
+      filter.ownerId = parent.ownerId;
       filter.parentId = parent._id;
     } else {
+      // La raíz listada siempre es la del usuario autenticado.
+      filter.ownerId = owner;
       filter.parentId = null;
     }
 
@@ -148,12 +152,18 @@ export class FoldersService {
 
   /** Renombra una carpeta; el nombre debe ser único entre sus hermanas activas. */
   async rename(
-    ownerId: string,
+    userId: string,
     folderId: string,
     dto: RenameFolderDto,
   ): Promise<FolderDocument> {
-    const owner = new Types.ObjectId(ownerId);
-    const folder = await this.findOwnedActiveFolder(folderId, owner);
+    // Renombrar requiere EDIT; puede venir de un share propio o heredado de
+    // un ancestro. La unicidad y el guardado se hacen sobre el dueño real.
+    const { resource: folder } = await this.accessService.requireFolderAccess(
+      userId,
+      folderId,
+      EffectiveAccess.EDIT,
+    );
+    const owner = folder.ownerId;
     const name = dto.name.trim();
     const previousName = folder.name;
 
@@ -179,7 +189,7 @@ export class FoldersService {
     // Auditoría: se conserva el nombre anterior solo como metadata; el
     // `resourceName` es la copia del nombre nuevo en el momento del evento.
     await this.activityService.log({
-      actorId: ownerId,
+      actorId: userId,
       action: ActivityAction.FOLDER_RENAME,
       resourceType: ActivityResourceType.FOLDER,
       resourceId: folder._id,

@@ -3,6 +3,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 
 import { ActivityModule } from '../activity/activity.module.js';
 import { File, FileSchema } from '../files/schemas/file.schema.js';
+import { SharesModule } from '../shares/shares.module.js';
 import { FoldersController } from './folders.controller.js';
 import { FoldersService } from './folders.service.js';
 import { Folder, FolderSchema } from './schemas/folder.schema.js';
@@ -16,6 +17,8 @@ import { Folder, FolderSchema } from './schemas/folder.schema.js';
     ]),
     // Registro de FOLDER_CREATE/RENAME/MOVE/DELETE.
     ActivityModule,
+    // AccessService: permisos directos y heredados de carpetas.
+    SharesModule,
   ],
   controllers: [FoldersController],
   providers: [FoldersService],

@@ -3,6 +3,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 
 import { ActivityModule } from '../activity/activity.module.js';
 import { Folder, FolderSchema } from '../folders/schemas/folder.schema.js';
+import { SharesModule } from '../shares/shares.module.js';
 import { User, UserSchema } from '../users/schemas/user.schema.js';
 import { FilesController } from './files.controller.js';
 import { FilesService } from './files.service.js';
@@ -18,6 +19,8 @@ import { File, FileSchema } from './schemas/file.schema.js';
     ]),
     // Registro de FILE_UPLOAD/DOWNLOAD/RENAME/MOVE/UPDATE.
     ActivityModule,
+    // AccessService: permisos directos y heredados de carpetas.
+    SharesModule,
   ],
   controllers: [FilesController],
   providers: [FilesService],

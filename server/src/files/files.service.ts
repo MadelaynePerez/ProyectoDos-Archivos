@@ -27,6 +27,7 @@ import {
 } from '../activity-log/schemas/activity-log.schema.js';
 import { ActivityService } from '../activity/activity.service.js';
 import { Folder, type FolderDocument } from '../folders/schemas/folder.schema.js';
+import { AccessService, EffectiveAccess } from '../shares/access.service.js';
 import { User } from '../users/schemas/user.schema.js';
 import {
   MAX_FILE_NAME_LENGTH,
@@ -70,8 +71,10 @@ interface GridFsMetadata {
  * solo guarda metadatos. No se usan transacciones: cada operación sigue un
  * orden con compensaciones explícitas para no dejar binarios huérfanos.
  *
- * Todas las consultas filtran por `ownerId` del token y `isDeleted: false`.
- * Un archivo de otro usuario responde 404 para no revelar su existencia.
+ * El acceso se resuelve con `AccessService`: el dueño tiene control total y un
+ * invitado puede llegar por un share directo o heredado de su carpeta. Sin
+ * acceso suficiente, un archivo ajeno responde 404 para no revelar su
+ * existencia. Crear, mover y eliminar siguen siendo exclusivos del dueño.
  */
 @Injectable()
 export class FilesService {
@@ -87,6 +90,7 @@ export class FilesService {
     @InjectConnection()
     private readonly connection: Connection,
     private readonly activityService: ActivityService,
+    private readonly accessService: AccessService,
   ) {}
 
   /**
@@ -195,17 +199,23 @@ export class FilesService {
     query: ListFilesQueryDto,
   ): Promise<FileDocument[]> {
     const owner = new Types.ObjectId(ownerId);
-    const filter: QueryFilter<File> = {
-      ownerId: owner,
-      isDeleted: false,
-    };
+    const filter: QueryFilter<File> = { isDeleted: false };
 
     if (query.folderId) {
-      // Validar el padre evita listar archivos de una carpeta ajena o en
-      // papelera y devuelve 404 en lugar de una lista vacía ambigua.
-      const folder = await this.findOwnedActiveFolder(query.folderId, owner);
+      // Un invitado con READ+ puede listar una carpeta compartida. Sin acceso,
+      // la carpeta se comporta como inexistente (404). Los archivos se filtran
+      // por el dueño real de la carpeta, no por el usuario que consulta.
+      const { resource: folder } = await this.accessService.requireFolderAccess(
+        ownerId,
+        query.folderId,
+        EffectiveAccess.READ,
+      );
+      filter.ownerId = folder.ownerId;
       filter.folderId = folder._id;
     } else {
+      // La raíz solo contiene archivos propios; los compartidos se consultan
+      // en GET /api/shares/shared-with-me.
+      filter.ownerId = owner;
       filter.folderId = null;
     }
 
@@ -226,9 +236,14 @@ export class FilesService {
       .exec();
   }
 
-  /** Metadatos de un archivo activo del usuario autenticado. */
-  async findOne(ownerId: string, fileId: string): Promise<FileDocument> {
-    return this.findOwnedActiveFile(fileId, new Types.ObjectId(ownerId));
+  /** Metadatos de un archivo propio o compartido con acceso READ+. */
+  async findOne(userId: string, fileId: string): Promise<FileDocument> {
+    const { resource } = await this.accessService.requireFileAccess(
+      userId,
+      fileId,
+      EffectiveAccess.READ,
+    );
+    return resource;
   }
 
   /**
@@ -236,12 +251,15 @@ export class FilesService {
    * El controller se encarga de fijar cabeceras y hacer `pipe`.
    */
   async getDownload(
-    ownerId: string,
+    userId: string,
     fileId: string,
   ): Promise<{ file: FileDocument; stream: Readable }> {
-    const file = await this.findOwnedActiveFile(
+    // READ es suficiente para ver metadatos y descargar, sea por share directo
+    // o heredado de una carpeta (incluidos sus ancestros).
+    const { resource: file } = await this.accessService.requireFileAccess(
+      userId,
       fileId,
-      new Types.ObjectId(ownerId),
+      EffectiveAccess.READ,
     );
     const bucket = this.getBucket();
 
@@ -255,7 +273,7 @@ export class FilesService {
     // Auditoría de la descarga. El `resourceName` es la copia del nombre y el
     // tamaño/extensión quedan como metadata acotada.
     await this.activityService.log({
-      actorId: ownerId,
+      actorId: userId,
       action: ActivityAction.FILE_DOWNLOAD,
       resourceType: ActivityResourceType.FILE,
       resourceId: file._id,
@@ -274,12 +292,18 @@ export class FilesService {
    * no dejar metadatos y binario desalineados.
    */
   async rename(
-    ownerId: string,
+    userId: string,
     fileId: string,
     dto: RenameFileDto,
   ): Promise<FileDocument> {
-    const owner = new Types.ObjectId(ownerId);
-    const file = await this.findOwnedActiveFile(fileId, owner);
+    // Renombrar es una modificación de metadata: requiere EDIT, que puede venir
+    // de un share directo o heredado de la carpeta.
+    const { resource: file } = await this.accessService.requireFileAccess(
+      userId,
+      fileId,
+      EffectiveAccess.EDIT,
+    );
+    const owner = file.ownerId;
     const newName = this.buildRenamedFileName(
       file.name,
       file.extension,
@@ -324,7 +348,7 @@ export class FilesService {
     // Auditoría: `resourceName` es el nombre nuevo; el anterior queda como
     // metadata para poder reconstruir el cambio.
     await this.activityService.log({
-      actorId: ownerId,
+      actorId: userId,
       action: ActivityAction.FILE_RENAME,
       resourceType: ActivityResourceType.FILE,
       resourceId: file._id,
@@ -341,8 +365,13 @@ export class FilesService {
     fileId: string,
     dto: MoveFileDto,
   ): Promise<FileDocument> {
-    const owner = new Types.ObjectId(ownerId);
-    const file = await this.findOwnedActiveFile(fileId, owner);
+    // Mover es una operación estructural: sigue siendo exclusiva del dueño.
+    const { resource: file } = await this.accessService.requireFileAccess(
+      ownerId,
+      fileId,
+      EffectiveAccess.OWNER,
+    );
+    const owner = file.ownerId;
     const fromFolderId = file.folderId;
 
     let newFolderId: Types.ObjectId | null = null;
@@ -408,12 +437,18 @@ export class FilesService {
    * Si falla 2 o 3 se revierte la metadata y se elimina el binario nuevo.
    */
   async updateContent(
-    ownerId: string,
+    userId: string,
     fileId: string,
     uploadedFile: UploadedMemoryFile | undefined,
   ): Promise<FileDocument> {
-    const owner = new Types.ObjectId(ownerId);
-    const file = await this.findOwnedActiveFile(fileId, owner);
+    // EDIT permite reemplazar contenido; MOVE/DELETE siguen reservados al
+    // propietario. El almacenamiento siempre se contabiliza al dueño real.
+    const { resource: file } = await this.accessService.requireFileAccess(
+      userId,
+      fileId,
+      EffectiveAccess.EDIT,
+    );
+    const owner = file.ownerId;
     const validated = this.validateUploadedFile(uploadedFile);
 
     // La extensión no puede cambiar por esta vía; para eso existe renombrar,
@@ -492,7 +527,7 @@ export class FilesService {
 
     // Auditoría del reemplazo de contenido, con el tamaño nuevo y el delta.
     await this.activityService.log({
-      actorId: ownerId,
+      actorId: userId,
       action: ActivityAction.FILE_UPDATE,
       resourceType: ActivityResourceType.FILE,
       resourceId: file._id,
@@ -625,25 +660,6 @@ export class FilesService {
     }
 
     return finalName;
-  }
-
-  private async findOwnedActiveFile(
-    fileId: string,
-    ownerId: Types.ObjectId,
-  ): Promise<FileDocument> {
-    if (!Types.ObjectId.isValid(fileId)) {
-      throw new NotFoundException('Archivo no encontrado');
-    }
-
-    const file = await this.fileModel
-      .findOne({ _id: fileId, ownerId, isDeleted: false })
-      .exec();
-
-    if (!file) {
-      throw new NotFoundException('Archivo no encontrado');
-    }
-
-    return file;
   }
 
   private async findOwnedActiveFolder(

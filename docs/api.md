@@ -21,6 +21,11 @@ El dueño de la carpeta o archivo se obtiene **siempre** del token
 - Todas las listas filtran `isDeleted: false`.
 - Los nombres de carpetas deben ser únicos entre hermanas activas del mismo
   dueño. La comparación es exacta (sensible a mayúsculas y acentos).
+- Un recurso compartido se accede según el permiso efectivo
+  (`OWNER > EDIT > COMMENT > READ > NONE`). Sin permiso suficiente la respuesta
+  también es **404**: el recurso "no existe" para ese usuario.
+- La herencia de permisos y el detalle de cada nivel se describen en
+  [Comparticiones](#comparticiones).
 
 ---
 
@@ -91,8 +96,9 @@ y `depth = padre.depth + 1`:
 
 ### GET `/api/folders?parentId=<id>`
 
-Lista las **subcarpetas activas** de un padre, ordenadas por nombre. Solo
-devuelve carpetas del usuario autenticado.
+Lista las **subcarpetas activas** de un padre, ordenadas por nombre. Sin
+`parentId` lista la raíz del usuario autenticado. En una carpeta compartida
+basta `READ` para poder listar su contenido.
 
 | Query | Obligatorio | Descripción |
 |---|---:|---|
@@ -133,13 +139,15 @@ Si el padre no tiene hijas activas, devuelve `[]`.
 | Código | Caso |
 |---:|---|
 | `400` | `parentId` no es un ObjectId válido. |
-| `404` | El padre no existe, está en papelera o es de otro usuario. |
+| `404` | El padre no existe, está en papelera o no hay acceso (`READ+`). |
 
 ---
 
 ### PATCH `/api/folders/:id/rename`
 
-Renombra una carpeta activa del usuario.
+Renombra una carpeta activa. El propietario siempre puede; un invitado
+necesita acceso efectivo `EDIT` sobre la carpeta (propio o heredado de un
+ancestro). La unicidad del nombre se valida contra las hermanas del dueño real.
 
 **Body**
 
@@ -160,7 +168,7 @@ Renombra una carpeta activa del usuario.
 | Código | Caso |
 |---:|---|
 | `400` | `name` vacío o inválido. |
-| `404` | La carpeta no existe, está en papelera o es de otro usuario. |
+| `404` | La carpeta no existe, está en papelera o no hay acceso `EDIT`. |
 | `409` | Ya existe una hermana activa con ese nombre. |
 
 ---
@@ -168,6 +176,7 @@ Renombra una carpeta activa del usuario.
 ### PATCH `/api/folders/:id/move`
 
 Mueve una carpeta y **todo su subárbol** a otro padre o a la raíz.
+**Solo el propietario**: un invitado con `EDIT` recibe `404`.
 
 **Body**
 
@@ -207,7 +216,7 @@ Para mover a la raíz:
 | Código | Caso |
 |---:|---|
 | `400` | Se intenta mover sobre sí misma, dentro de un descendiente, o se supera la profundidad máxima. |
-| `404` | La carpeta o el destino no existen, o son de otro usuario. |
+| `404` | La carpeta o el destino no existen, son de otro usuario o el llamador no es el propietario. |
 | `409` | El destino está en papelera o hay conflicto de nombre. |
 
 ---
@@ -216,6 +225,7 @@ Para mover a la raíz:
 
 Envía a la papelera la carpeta, sus subcarpetas activas y los archivos activos
 de ese subárbol. Es un **soft delete**: no se borra nada físicamente.
+**Solo el propietario**: un invitado con `EDIT` recibe `404`.
 
 - La carpeta raíz de la operación recibe `deletedRootId = _id`.
 - Los descendientes activos reciben el mismo `deletedAt`, `deletedBy` y
@@ -245,7 +255,7 @@ de ese subárbol. Es un **soft delete**: no se borra nada físicamente.
 
 | Código | Caso |
 |---:|---|
-| `404` | La carpeta no existe, ya está en papelera o es de otro usuario. |
+| `404` | La carpeta no existe, ya está en papelera o el llamador no es el propietario. |
 
 ---
 
@@ -265,7 +275,10 @@ Solo se permiten archivos de texto `.txt` y `.md`.
 - Tamaño máximo: **5 MB**.
 - `folderId` opcional: si se omite, el archivo vive en la raíz del usuario.
 - Nombre único entre archivos activos de la misma carpeta y dueño.
-- Archivo, carpeta destino o contenido de otro usuario: **404**.
+- Archivo, carpeta destino o contenido sin acceso suficiente: **404**.
+- Subir siempre crea un recurso: es una operación estructural y queda
+  reservada al propietario. Un invitado con `EDIT` puede actualizar el
+  contenido o renombrar, pero no crear archivos nuevos en la carpeta.
 
 ### POST `/api/files`
 
@@ -310,7 +323,7 @@ curl -X POST http://localhost:3000/api/files \
 | Código | Caso |
 |---:|---|
 | `400` | Falta `file`, extensión no permitida, MIME no textual, contenido no UTF-8 o `folderId` inválido. |
-| `404` | La carpeta no existe, está en papelera o es de otro usuario. |
+| `404` | La carpeta no existe, está en papelera, es de otro usuario o el llamador no es el propietario. |
 | `409` | Ya existe un archivo activo con ese nombre en la carpeta. |
 | `413` | El archivo supera los 5 MB. |
 
@@ -318,7 +331,10 @@ curl -X POST http://localhost:3000/api/files \
 
 ### GET `/api/files`
 
-Lista metadatos de archivos activos de una carpeta o de la raíz.
+Lista metadatos de archivos activos de una carpeta o de la raíz. La raíz solo
+devuelve archivos propios; una carpeta compartida devuelve su contenido a los
+invitados con `READ+`. Los archivos compartidos sueltos se consultan en
+`GET /api/shares/shared-with-me`.
 
 | Query | Obligatorio | Descripción |
 |---|---:|---|
@@ -340,13 +356,15 @@ Authorization: Bearer <accessToken>
 | Código | Caso |
 |---:|---|
 | `400` | Algún filtro u orden inválido. |
-| `404` | La carpeta no existe, está en papelera o es de otro usuario. |
+| `404` | La carpeta no existe, está en papelera o no hay acceso `READ`. |
 
 ---
 
 ### GET `/api/files/:id`
 
-Devuelve los metadatos de un archivo activo del usuario.
+Devuelve los metadatos de un archivo activo propio o compartido con `READ+`.
+El permiso puede ser directo sobre el archivo o heredado de su carpeta y de los
+ancestros de esa carpeta.
 
 **Respuesta `200`**: documento de `files`.
 
@@ -354,13 +372,14 @@ Devuelve los metadatos de un archivo activo del usuario.
 
 | Código | Caso |
 |---:|---|
-| `404` | El archivo no existe, está en papelera o es de otro usuario. |
+| `404` | El archivo no existe, está en papelera o no hay acceso `READ`. |
 
 ---
 
 ### GET `/api/files/:id/download`
 
-Descarga el contenido desde GridFS mediante streaming.
+Descarga el contenido desde GridFS mediante streaming. Requiere `READ+`
+(directo o heredado). Cada descarga registra `FILE_DOWNLOAD` con el actor real.
 
 - `Content-Type`: `text/plain; charset=utf-8` o `text/markdown; charset=utf-8`.
 - `Content-Disposition`: `attachment` con el nombre visible.
@@ -370,14 +389,14 @@ Descarga el contenido desde GridFS mediante streaming.
 
 | Código | Caso |
 |---:|---|
-| `404` | El archivo o su binario no existen, está en papelera o es de otro usuario. |
+| `404` | El archivo o su binario no existen, está en papelera o no hay acceso `READ`. |
 
 ---
 
 ### PATCH `/api/files/:id/rename`
 
 Renombra conservando la extensión original y actualiza también `filename` en
-GridFS.
+GridFS. Requiere `EDIT` (propio o heredado); el propietario siempre puede.
 
 **Body**
 
@@ -401,7 +420,7 @@ una extensión distinta a la actual, se responde `400`.
 | Código | Caso |
 |---:|---|
 | `400` | Nombre vacío o intento de cambiar la extensión. |
-| `404` | El archivo no existe, está en papelera o es de otro usuario. |
+| `404` | El archivo no existe, está en papelera o no hay acceso `EDIT`. |
 | `409` | Ya existe un archivo activo con ese nombre en la carpeta. |
 
 ---
@@ -409,6 +428,7 @@ una extensión distinta a la actual, se responde `400`.
 ### PATCH `/api/files/:id/move`
 
 Mueve un archivo a otra carpeta activa del mismo dueño o a la raíz.
+**Solo el propietario**: un invitado con `EDIT` recibe `404`.
 
 **Body**
 
@@ -429,7 +449,7 @@ Mueve un archivo a otra carpeta activa del mismo dueño o a la raíz.
 | Código | Caso |
 |---:|---|
 | `400` | Falta `newFolderId` o el id es inválido. |
-| `404` | El archivo o la carpeta destino no existen, o son de otro usuario. |
+| `404` | El archivo o la carpeta destino no existen, son de otro usuario o el llamador no es el propietario. |
 | `409` | La carpeta destino está en papelera o hay conflicto de nombre. |
 
 ---
@@ -438,7 +458,9 @@ Mueve un archivo a otra carpeta activa del mismo dueño o a la raíz.
 
 Reemplaza el contenido de un archivo existente. `multipart/form-data` con el
 campo `file`. El nuevo archivo debe conservar la extensión actual y cumple las
-mismas validaciones de tipo, UTF-8 y tamaño.
+mismas validaciones de tipo, UTF-8 y tamaño. Requiere `EDIT` (propio o
+heredado). El espacio se sigue contabilizando en `storageUsed` del dueño real
+del archivo, aunque quien edite sea un invitado.
 
 **Orden sin transacciones**
 
@@ -464,8 +486,195 @@ curl -X PUT http://localhost:3000/api/files/6710000000000000000000f1/content \
 | Código | Caso |
 |---:|---|
 | `400` | Falta `file`, extensión distinta, MIME no textual o contenido no UTF-8. |
-| `404` | El archivo no existe, está en papelera o es de otro usuario. |
+| `404` | El archivo no existe, está en papelera o no hay acceso `EDIT`. |
 | `413` | El archivo supera los 5 MB. |
+
+---
+
+## Comparticiones
+
+Colección: `shares`. Es la relación muchos-a-muchos entre usuarios y recursos
+(`FILE` o `FOLDER`). Un recurso solo puede tener un share por destinatario; para
+cambiar el nivel se actualiza el mismo documento.
+
+### Modelo de permisos
+
+Jerarquía creciente: `READ < COMMENT < EDIT`; el propietario se representa como
+`OWNER`.
+
+| Nivel | Permite |
+|---|---|
+| `READ` | Ver metadatos, listar el contenido de una carpeta y descargar archivos. |
+| `COMMENT` | Todo lo de `READ`. Reservado para una futura funcionalidad de comentarios. |
+| `EDIT` | Todo lo de `COMMENT`, renombrar y reemplazar el contenido de archivos. |
+| `OWNER` | Control total. No se guarda en `shares`; se deriva de `ownerId`. |
+| `NONE` | Sin acceso. Toda operación responde `404`. |
+
+Reglas de herencia:
+
+- El permiso de una carpeta aplica a todo su contenido **actual y futuro**:
+  archivos, subcarpetas y los archivos de esas subcarpetas.
+- Para un **archivo**, el acceso efectivo es el máximo entre:
+  - el share directo del archivo, y
+  - los shares de su carpeta contenedora y de todas las carpetas en
+    `folder.ancestors`.
+- Para una **carpeta**, el acceso efectivo es el máximo entre sus propios
+  shares y los de sus ancestros.
+- Revocar un share de carpeta elimina la herencia, pero no los shares directos
+  que existan sobre archivos concretos. Revocar un archivo no afecta a la
+  carpeta.
+- Un recurso en papelera devuelve `NONE` para todos, aunque el share siga
+  existiendo. Al restaurarlo, el permiso vuelve a aplicar.
+- Operaciones estructurales (**crear, mover, eliminar y compartir**) son
+  exclusivas del propietario. Un invitado no puede re-compartir.
+- Un usuario desactivado no puede autenticarse; sus `shares` se conservan.
+
+El cálculo centralizado vive en `AccessService#getEffectiveAccess`, que devuelve
+`OWNER`, `EDIT`, `COMMENT`, `READ` o `NONE`. `FilesModule` y `FoldersModule` lo
+usan en cada operación; un recurso sin acceso suficiente se responde como `404`.
+
+### POST `/api/shares`
+
+Concede un permiso. Si ya existe un share para el mismo recurso y destinatario,
+**actualiza `access`** en el mismo documento (no duplica). Solo el propietario
+del recurso puede compartirlo.
+
+**Body**
+
+| Campo | Tipo | Obligatorio | Descripción |
+|---|---|---:|---|
+| `resourceType` | `string` | Sí | `FILE` o `FOLDER`. |
+| `resourceId` | `string` | Sí | `_id` del recurso, activo y del usuario autenticado. |
+| `granteeEmail` | `string` | Condicional | Email del destinatario. Excluyente con `granteeId`. |
+| `granteeId` | `string` | Condicional | `_id` del destinatario. Excluyente con `granteeEmail`. |
+| `access` | `string` | Sí | `READ`, `COMMENT` o `EDIT`. |
+
+Debe enviarse **exactamente uno** de `granteeEmail` o `granteeId`. El
+destinatario debe existir, estar activo y ser distinto del propietario.
+
+```json
+{
+  "resourceType": "FOLDER",
+  "resourceId": "6700000000000000000000a2",
+  "granteeEmail": "luis@example.com",
+  "access": "READ"
+}
+```
+
+**Respuesta `201`**: documento de `shares`. Si el permiso ya existía, la
+respuesta es el mismo documento actualizado (`201`).
+
+```json
+{
+  "_id": "67400000000000000000ee01",
+  "resourceType": "FOLDER",
+  "resourceId": "6700000000000000000000a2",
+  "ownerId": "66f1a1c2e4b0a1b2c3d4e5f6",
+  "granteeId": "66f1a1c2e4b0a1b2c3d4e5f7",
+  "access": "READ",
+  "createdAt": "2026-10-19T15:00:00.000Z",
+  "updatedAt": "2026-10-19T15:00:00.000Z"
+}
+```
+
+**Errores**
+
+| Código | Caso |
+|---:|---|
+| `400` | `resourceType`/`access` inválidos, faltan o sobran identificadores del destinatario, o el destinatario es el propietario. |
+| `404` | El recurso no existe, está en papelera o no es del usuario; el destinatario no existe o está inactivo. |
+
+---
+
+### PATCH `/api/shares/:id`
+
+Cambia el nivel de acceso de un share. Solo el propietario que lo concedió.
+
+**Body**
+
+| Campo | Tipo | Obligatorio | Descripción |
+|---|---|---:|---|
+| `access` | `string` | Sí | `READ`, `COMMENT` o `EDIT`. |
+
+```json
+{
+  "access": "EDIT"
+}
+```
+
+**Respuesta `200`**: documento de `shares` actualizado.
+
+**Errores**
+
+| Código | Caso |
+|---:|---|
+| `400` | `access` inválido. |
+| `404` | El share no existe o no pertenece al usuario autenticado. |
+
+---
+
+### DELETE `/api/shares/:id`
+
+Retira un permiso. Solo el propietario que lo concedió. Los permisos heredados
+de este share dejan de aplicar al contenido del recurso.
+
+**Respuesta `200`**
+
+```json
+{
+  "shareId": "67400000000000000000ee01",
+  "revoked": true
+}
+```
+
+**Errores**
+
+| Código | Caso |
+|---:|---|
+| `404` | El share no existe o no pertenece al usuario autenticado. |
+
+---
+
+### GET `/api/shares/shared-by-me`
+
+Permisos concedidos por el usuario autenticado, del más reciente al más antiguo.
+Incluye el **nombre actual** del recurso (aunque se haya renombrado) y los datos
+básicos del destinatario. Se omiten shares de recursos purgados o en papelera.
+
+**Respuesta `200`**
+
+```json
+[
+  {
+    "_id": "67400000000000000000ee01",
+    "resourceType": "FOLDER",
+    "resourceId": "6700000000000000000000a2",
+    "resourceName": "2026",
+    "access": "EDIT",
+    "owner": {
+      "_id": "66f1a1c2e4b0a1b2c3d4e5f6",
+      "name": "Ana Torres",
+      "email": "ana.torres@example.com"
+    },
+    "grantee": {
+      "_id": "66f1a1c2e4b0a1b2c3d4e5f7",
+      "name": "Luis Gómez",
+      "email": "luis@example.com"
+    },
+    "createdAt": "2026-10-05T15:00:00.000Z",
+    "updatedAt": "2026-10-19T15:00:00.000Z"
+  }
+]
+```
+
+### GET `/api/shares/shared-with-me`
+
+Permisos recibidos por el usuario autenticado, del más reciente al más antiguo.
+Mismo formato que el listado anterior. Un archivo dentro de una carpeta
+compartida no aparece aquí: se accede navegando la carpeta o con el share
+directo del archivo.
+
+**Respuesta `200`**: array con el mismo formato que `shared-by-me`.
 
 ---
 
@@ -482,6 +691,11 @@ Acciones registradas actualmente:
 - `AUTH_LOGIN` al iniciar sesión correctamente.
 - `FOLDER_CREATE`, `FOLDER_RENAME`, `FOLDER_MOVE`, `FOLDER_DELETE`.
 - `FILE_UPLOAD`, `FILE_DOWNLOAD`, `FILE_RENAME`, `FILE_MOVE`, `FILE_UPDATE`.
+- `SHARE_GRANT`, `SHARE_UPDATE` y `SHARE_REVOKE` con
+  `resourceType: "SHARE"` y el `_id` del share en `resourceId`. El `metadata`
+  conserva `resourceType`, `resourceId` y `granteeId` del recurso compartido,
+  más `access` (y `previousAccess` en las actualizaciones). El `resourceName`
+  es una copia del nombre del recurso en ese momento.
 
 ### GET `/api/activity`
 
@@ -554,5 +768,14 @@ hay eventos, `items` es `[]` y `totalPages` es `0`.
 - **Archivos**: el contenido se guarda en GridFS; `users.storageUsed` se
   incrementa al subir y se ajusta al reemplazar contenido. Incluye archivos en
   papelera: solo disminuirá al purgarlos definitivamente.
+- **Permisos**: `AccessService` resuelve el acceso efectivo combinando el share
+  directo con la herencia de la carpeta y sus `ancestors`, sin materializar
+  permisos por archivo. `FilesModule` y `FoldersModule` exigen `READ` para
+  ver/listar/descargar y `EDIT` para renombrar o cambiar contenido; mover,
+  eliminar, crear y compartir siguen siendo exclusivos del propietario.
+- **Shares**: el índice único `{ resourceType, resourceId, granteeId }` evita
+  duplicados; conceder de nuevo actualiza `access`. No se usan transacciones:
+  la escritura del share y su evento de auditoría son pasos independientes e
+  idempotentes.
 - **Soft delete de archivos**: no está en esta entrega; se implementará junto
   con el `TrashModule`.

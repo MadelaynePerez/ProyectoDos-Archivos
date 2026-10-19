@@ -8,6 +8,7 @@ import { AppService } from './app.service.js';
 import { AuthModule } from './auth/auth.module.js';
 import { FilesModule } from './files/files.module.js';
 import { FoldersModule } from './folders/folders.module.js';
+import { SharesModule } from './shares/shares.module.js';
 import { UsersModule } from './users/users.module.js';
 
 @Module({
@@ -29,6 +30,7 @@ import { UsersModule } from './users/users.module.js';
     ActivityModule,
     FoldersModule,
     FilesModule,
+    SharesModule,
   ],
   controllers: [AppController],
   providers: [AppService],
