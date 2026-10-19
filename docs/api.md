@@ -491,6 +491,221 @@ curl -X PUT http://localhost:3000/api/files/6710000000000000000000f1/content \
 
 ---
 
+### DELETE `/api/files/:id`
+
+Envía un archivo a la papelera. Es un **soft delete**: no borra el binario de
+GridFS ni resta `storageUsed`, porque el espacio se libera solo con la purga
+definitiva. **Solo el propietario**: un invitado con `EDIT` recibe `404`.
+
+- Marca `isDeleted: true`, `deletedAt`, `deletedBy` y
+  `deletedRootId = archivo._id`.
+- Registra `FILE_DELETE` con `parentId`, `extension` y `size`.
+- El archivo deja de aparecer en todos los listados y descargas estándar.
+
+**Respuesta `200`**: documento del archivo ya marcado como borrado.
+
+```json
+{
+  "_id": "6710000000000000000000f1",
+  "name": "informe.txt",
+  "folderId": "6700000000000000000000a1",
+  "isDeleted": true,
+  "deletedAt": "2026-10-19T18:00:00.000Z",
+  "deletedBy": "66f1a1c2e4b0a1b2c3d4e5f6",
+  "deletedRootId": "6710000000000000000000f1"
+}
+```
+
+**Errores**
+
+| Código | Caso |
+|---:|---|
+| `404` | El archivo no existe, ya está en papelera o el llamador no es el propietario. |
+
+---
+
+## Papelera
+
+La papelera no es una colección aparte: son los documentos de `files` y
+`folders` con `isDeleted: true`. `deletedRootId` identifica la raíz de cada
+borrado:
+
+- Archivo borrado suelto: `deletedRootId = archivo._id`.
+- Carpeta borrada: la carpeta y sus descendientes activos reciben
+  `deletedRootId = carpeta._id`.
+- Los descendientes que ya estaban en papelera antes conservan su propia raíz;
+  al restaurar la carpeta no se "resucitan" borrados independientes anteriores.
+
+En las rutas, `:type` acepta `file` o `folder` (sin distinguir mayúsculas).
+
+### GET `/api/trash`
+
+Lista las **raíces** de la papelera del usuario autenticado: solo documentos
+con `isDeleted: true` y `deletedRootId == _id`. Los descendientes de una
+carpeta no se listan por separado. Archivos y carpetas se devuelven en un único
+array ordenado por `deletedAt` descendente.
+
+**Respuesta `200`**
+
+```json
+[
+  {
+    "_id": "6700000000000000000000a1",
+    "type": "folder",
+    "name": "Proyectos",
+    "ownerId": "66f1a1c2e4b0a1b2c3d4e5f6",
+    "parentId": null,
+    "ancestors": [],
+    "depth": 0,
+    "isDeleted": true,
+    "deletedAt": "2026-10-19T18:10:00.000Z",
+    "deletedBy": "66f1a1c2e4b0a1b2c3d4e5f6",
+    "deletedRootId": "6700000000000000000000a1"
+  },
+  {
+    "_id": "6710000000000000000000f1",
+    "type": "file",
+    "name": "informe.txt",
+    "ownerId": "66f1a1c2e4b0a1b2c3d4e5f6",
+    "folderId": null,
+    "extension": "txt",
+    "mimeType": "text/plain",
+    "size": 4821,
+    "gridFsId": "67200000000000000000ab01",
+    "isDeleted": true,
+    "deletedAt": "2026-10-19T18:00:00.000Z",
+    "deletedBy": "66f1a1c2e4b0a1b2c3d4e5f6",
+    "deletedRootId": "6710000000000000000000f1"
+  }
+]
+```
+
+Si la papelera está vacía, devuelve `[]`.
+
+**Errores**
+
+| Código | Caso |
+|---:|---|
+| `401` | Falta el JWT o no es válido. |
+
+---
+
+### POST `/api/trash/:type/:id/restore`
+
+Restaura un archivo o una carpeta. Solo el propietario del recurso puede
+restaurarlo.
+
+**Reglas**
+
+- El padre (`folderId` del archivo o `parentId` de la carpeta) debe estar
+  activo. Si el padre sigue en papelera o no existe, responde `409`: primero
+  debe restaurarse el ancestro.
+- El nombre no puede chocar con un hermano activo del mismo dueño; si choca,
+  responde `409` y el cliente decide renombrar.
+- Restaurar una carpeta restaura también todos los documentos con
+  `deletedRootId = carpeta._id` (subcarpetas y archivos de esa cascada).
+- Los descendientes con otra raíz (borrados antes por separado) siguen en
+  papelera.
+- Restaurar no modifica `storageUsed`: el espacio ya se contaba desde la
+  subida.
+- Registra `FILE_RESTORE` o `FOLDER_RESTORE` cuando el estado ya quedó
+  restaurado.
+
+**Respuesta `200`**: documento del recurso restaurado (`isDeleted: false`,
+`deletedAt`, `deletedBy` y `deletedRootId` en `null`).
+
+**Errores**
+
+| Código | Caso |
+|---:|---|
+| `400` | `:type` no es `file` ni `folder`. |
+| `404` | El recurso no existe, no está en papelera o es de otro usuario. |
+| `409` | El padre no está activo o el nombre choca con un hermano activo. |
+
+---
+
+### DELETE `/api/trash/:type/:id`
+
+Purga definitivamente un recurso de la papelera. La operación **no usa
+transacciones** y sigue un orden seguro:
+
+1. **Primero** escribe el evento de auditoría (`FILE_PURGE` o `FOLDER_PURGE`)
+   con `resourceName`, contadores y `batchId`. Es el último momento en que se
+   conoce el nombre y el contexto.
+2. Borra los binarios de GridFS: primero `fs.chunks` y después `fs.files`.
+3. Borra las comparticiones (`shares`) de los recursos afectados.
+4. Borra los documentos de `files` y `folders`.
+5. Resta `storageUsed` al dueño con un `$inc` atómico por la suma de tamaños
+   capturada antes de borrar.
+
+Para un **archivo** se purga solo ese archivo. Para una **carpeta** se purga
+todo el subárbol (`ancestors: carpeta._id`) y todos sus archivos, estén o no en
+papelera, porque el subárbol desaparece físicamente.
+
+**Respuesta `200`**
+
+```json
+{
+  "type": "folder",
+  "resourceId": "6700000000000000000000a1",
+  "name": "Proyectos",
+  "affectedFolders": 3,
+  "affectedFiles": 8,
+  "freedBytes": 48213,
+  "batchId": "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+}
+```
+
+`affectedFolders` incluye la carpeta raíz y todos sus descendientes.
+`affectedFiles` cuenta todos los archivos del subárbol. `freedBytes` es la suma
+de `size` restada de `storageUsed`.
+
+**Errores**
+
+| Código | Caso |
+|---:|---|
+| `400` | `:type` no es `file` ni `folder`. |
+| `404` | El recurso no existe, no está en papelera o es de otro usuario. |
+
+> Si falla un paso intermedio, el evento de auditoría ya quedó escrito y los
+> pasos 2–4 son idempotentes, por lo que la operación puede reintentarse. Un
+> binario huérfano o un `storageUsed` desajustado se corrigen con el job de
+> reconciliación descrito en `modelo.md`.
+
+---
+
+### DELETE `/api/trash`
+
+Vacía la papelera completa del usuario autenticado. Incluye todas las raíces
+borradas y, para cada carpeta en papelera, todo su subárbol físico.
+
+- Escribe **primero** `TRASH_EMPTY` con `batchId`, `affectedFolders`,
+  `affectedFiles` y `freedBytes`.
+- Después limpia GridFS, `shares` y documentos igual que una purga individual.
+- Resta el total liberado de `storageUsed` con `$inc` atómico.
+
+**Respuesta `200`**
+
+```json
+{
+  "type": "trash",
+  "resourceId": null,
+  "name": "Papelera",
+  "affectedFolders": 3,
+  "affectedFiles": 8,
+  "freedBytes": 48213,
+  "batchId": "8d0f7780-8536-51ef-a55c-f18ad2c01bf8"
+}
+```
+
+**Errores**
+
+| Código | Caso |
+|---:|---|
+| `401` | Falta el JWT o no es válido. |
+
+---
+
 ## Comparticiones
 
 Colección: `shares`. Es la relación muchos-a-muchos entre usuarios y recursos
@@ -689,8 +904,12 @@ purgue definitivamente.
 Acciones registradas actualmente:
 
 - `AUTH_LOGIN` al iniciar sesión correctamente.
-- `FOLDER_CREATE`, `FOLDER_RENAME`, `FOLDER_MOVE`, `FOLDER_DELETE`.
-- `FILE_UPLOAD`, `FILE_DOWNLOAD`, `FILE_RENAME`, `FILE_MOVE`, `FILE_UPDATE`.
+- `FOLDER_CREATE`, `FOLDER_RENAME`, `FOLDER_MOVE`, `FOLDER_DELETE`,
+  `FOLDER_RESTORE`, `FOLDER_PURGE`.
+- `FILE_UPLOAD`, `FILE_DOWNLOAD`, `FILE_RENAME`, `FILE_MOVE`, `FILE_UPDATE`,
+  `FILE_DELETE`, `FILE_RESTORE`, `FILE_PURGE`.
+- `TRASH_EMPTY` al vaciar la papelera, con `resourceType: "SYSTEM"` y
+  contadores de carpetas, archivos y bytes liberados.
 - `SHARE_GRANT`, `SHARE_UPDATE` y `SHARE_REVOKE` con
   `resourceType: "SHARE"` y el `_id` del share en `resourceId`. El `metadata`
   conserva `resourceType`, `resourceId` y `granteeId` del recurso compartido,
@@ -764,10 +983,15 @@ hay eventos, `items` es `[]` y `totalPages` es `0`.
 - **Auditoría**: `ActivityModule` escribe `FOLDER_*` y `FILE_*` en
   `activity_log` después de que el estado del recurso ya es correcto. El login
   registra `AUTH_LOGIN`. `activity_log` no tiene endpoints de actualización ni
-  de borrado.
+  de borrado. En las purgas, el evento se escribe **antes** de destruir el
+  recurso; `TRASH_EMPTY` también se registra antes del vaciado.
 - **Archivos**: el contenido se guarda en GridFS; `users.storageUsed` se
   incrementa al subir y se ajusta al reemplazar contenido. Incluye archivos en
   papelera: solo disminuirá al purgarlos definitivamente.
+- **Papelera**: el soft delete de archivos y carpetas no toca GridFS ni
+  `storageUsed`. `deletedRootId` agrupa cada cascada; las raíces se listan en
+  `GET /api/trash`. La purga elimina la cascada completa, sus shares y sus
+  binarios, y resta el espacio con `$inc`.
 - **Permisos**: `AccessService` resuelve el acceso efectivo combinando el share
   directo con la herencia de la carpeta y sus `ancestors`, sin materializar
   permisos por archivo. `FilesModule` y `FoldersModule` exigen `READ` para
@@ -777,5 +1001,3 @@ hay eventos, `items` es `[]` y `totalPages` es `0`.
   duplicados; conceder de nuevo actualiza `access`. No se usan transacciones:
   la escritura del share y su evento de auditoría son pasos independientes e
   idempotentes.
-- **Soft delete de archivos**: no está en esta entrega; se implementará junto
-  con el `TrashModule`.

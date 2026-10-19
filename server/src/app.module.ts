@@ -9,6 +9,7 @@ import { AuthModule } from './auth/auth.module.js';
 import { FilesModule } from './files/files.module.js';
 import { FoldersModule } from './folders/folders.module.js';
 import { SharesModule } from './shares/shares.module.js';
+import { TrashModule } from './trash/trash.module.js';
 import { UsersModule } from './users/users.module.js';
 
 @Module({
@@ -31,6 +32,7 @@ import { UsersModule } from './users/users.module.js';
     FoldersModule,
     FilesModule,
     SharesModule,
+    TrashModule,
   ],
   controllers: [AppController],
   providers: [AppService],

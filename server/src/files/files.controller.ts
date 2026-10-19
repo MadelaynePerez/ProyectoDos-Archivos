@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -20,6 +21,7 @@ import type { Request, Response } from 'express';
 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import type { AuthenticatedUser } from '../auth/interfaces/jwt-payload.interface.js';
+import { TrashService } from '../trash/trash.service.js';
 import { ListFilesQueryDto } from './dto/list-files-query.dto.js';
 import { MoveFileDto } from './dto/move-file.dto.js';
 import { RenameFileDto } from './dto/rename-file.dto.js';
@@ -50,7 +52,10 @@ const MULTIPART_OPTIONS = {
 @Controller('files')
 @UseGuards(JwtAuthGuard)
 export class FilesController {
-  constructor(private readonly filesService: FilesService) {}
+  constructor(
+    private readonly filesService: FilesService,
+    private readonly trashService: TrashService,
+  ) {}
 
   /** POST /api/files — subida multipart; campo `file`, `folderId` opcional. */
   @Post()
@@ -124,6 +129,18 @@ export class FilesController {
     @Req() request: AuthenticatedRequest,
   ): Promise<FileDocument> {
     return this.filesService.findOne(request.user.id, id);
+  }
+
+  /**
+   * DELETE /api/files/:id — envía el archivo a la papelera.
+   * Solo el propietario: un invitado con EDIT recibe 404.
+   */
+  @Delete(':id')
+  softDelete(
+    @Param('id') id: string,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<FileDocument> {
+    return this.trashService.softDeleteFile(request.user.id, id);
   }
 
   /** PATCH /api/files/:id/rename — renombra conservando la extensión. */

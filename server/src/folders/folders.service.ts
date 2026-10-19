@@ -46,7 +46,7 @@ export class FoldersService {
     @InjectModel(Folder.name)
     private readonly folderModel: Model<Folder>,
     // Se usa únicamente para propagar el soft delete de una carpeta a sus
-    // archivos; el FilesModule se implementará más adelante.
+    // archivos; el TrashModule consume estos modelos directamente.
     @InjectModel(File.name)
     private readonly fileModel: Model<File>,
     private readonly activityService: ActivityService,
