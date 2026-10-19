@@ -5,6 +5,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
 import { AuthModule } from './auth/auth.module.js';
+import { FilesModule } from './files/files.module.js';
 import { FoldersModule } from './folders/folders.module.js';
 import { UsersModule } from './users/users.module.js';
 
@@ -25,6 +26,7 @@ import { UsersModule } from './users/users.module.js';
     UsersModule,
     AuthModule,
     FoldersModule,
+    FilesModule,
   ],
   controllers: [AppController],
   providers: [AppService],
