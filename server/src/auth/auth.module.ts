@@ -7,6 +7,7 @@ import {
 } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 
+import { ActivityModule } from '../activity/activity.module.js';
 import { UsersModule } from '../users/users.module.js';
 import { AuthController } from './auth.controller.js';
 import { AuthService } from './auth.service.js';
@@ -16,6 +17,8 @@ import { JwtStrategy } from './strategies/jwt.strategy.js';
   imports: [
     // UsersService es necesario para registrar y validar credenciales.
     UsersModule,
+    // Registro de AUTH_LOGIN tras un login correcto.
+    ActivityModule,
     PassportModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],

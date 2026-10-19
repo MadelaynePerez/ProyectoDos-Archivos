@@ -21,6 +21,11 @@ import {
   type QueryFilter,
 } from 'mongoose';
 
+import {
+  ActivityAction,
+  ActivityResourceType,
+} from '../activity-log/schemas/activity-log.schema.js';
+import { ActivityService } from '../activity/activity.service.js';
 import { Folder, type FolderDocument } from '../folders/schemas/folder.schema.js';
 import { User } from '../users/schemas/user.schema.js';
 import {
@@ -81,6 +86,7 @@ export class FilesService {
     private readonly userModel: Model<User>,
     @InjectConnection()
     private readonly connection: Connection,
+    private readonly activityService: ActivityService,
   ) {}
 
   /**
@@ -124,8 +130,10 @@ export class FilesService {
       throw error;
     }
 
+    let created: FileDocument | null = null;
+
     try {
-      const created = await this.fileModel.create({
+      created = await this.fileModel.create({
         _id: fileId,
         name: validated.name,
         ownerId: owner,
@@ -144,12 +152,6 @@ export class FilesService {
       if (userResult.matchedCount === 0) {
         throw new NotFoundException('Usuario no encontrado');
       }
-
-      // TODO(activity): cuando exista ActivityModule/ActivityLogService,
-      // registrar FILE_UPLOAD con actorId, resourceId, resourceName y metadata
-      // (parentId, extension, size). No se crea el módulo aquí.
-
-      return created;
     } catch (error) {
       // El documento pudo crearse antes de fallar `$inc`; se elimina también.
       await this.fileModel.deleteOne({ _id: fileId }).exec().catch(() => {
@@ -164,6 +166,27 @@ export class FilesService {
       }
       throw error;
     }
+
+    if (!created) {
+      throw new InternalServerErrorException('No se pudo crear el archivo');
+    }
+
+    // El log se escribe al final, cuando el archivo y `storageUsed` ya son
+    // consistentes. Un fallo del log no revierte una subida correcta.
+    await this.activityService.log({
+      actorId: ownerId,
+      action: ActivityAction.FILE_UPLOAD,
+      resourceType: ActivityResourceType.FILE,
+      resourceId: created._id,
+      resourceName: created.name,
+      metadata: {
+        parentId: created.folderId,
+        extension: created.extension,
+        size: created.size,
+      },
+    });
+
+    return created;
   }
 
   /** Lista metadatos de archivos activos de una carpeta o de la raíz. */
@@ -229,7 +252,16 @@ export class FilesService {
       throw new NotFoundException('Contenido del archivo no encontrado');
     }
 
-    // TODO(activity): registrar FILE_DOWNLOAD con actorId y resourceId.
+    // Auditoría de la descarga. El `resourceName` es la copia del nombre y el
+    // tamaño/extensión quedan como metadata acotada.
+    await this.activityService.log({
+      actorId: ownerId,
+      action: ActivityAction.FILE_DOWNLOAD,
+      resourceType: ActivityResourceType.FILE,
+      resourceId: file._id,
+      resourceName: file.name,
+      metadata: { extension: file.extension, size: file.size },
+    });
 
     return { file, stream: bucket.openDownloadStream(file.gridFsId) };
   }
@@ -289,8 +321,16 @@ export class FilesService {
       );
     }
 
-    // TODO(activity): registrar FILE_RENAME con resourceId, resourceName y
-    // el nombre anterior si se desea auditar.
+    // Auditoría: `resourceName` es el nombre nuevo; el anterior queda como
+    // metadata para poder reconstruir el cambio.
+    await this.activityService.log({
+      actorId: ownerId,
+      action: ActivityAction.FILE_RENAME,
+      resourceType: ActivityResourceType.FILE,
+      resourceId: file._id,
+      resourceName: file.name,
+      metadata: { previousName },
+    });
 
     return file;
   }
@@ -303,6 +343,7 @@ export class FilesService {
   ): Promise<FileDocument> {
     const owner = new Types.ObjectId(ownerId);
     const file = await this.findOwnedActiveFile(fileId, owner);
+    const fromFolderId = file.folderId;
 
     let newFolderId: Types.ObjectId | null = null;
 
@@ -343,8 +384,15 @@ export class FilesService {
       throw error;
     }
 
-    // TODO(activity): registrar FILE_MOVE con metadata.fromFolderId y
-    // metadata.toFolderId.
+    // Auditoría del cambio de carpeta.
+    await this.activityService.log({
+      actorId: ownerId,
+      action: ActivityAction.FILE_MOVE,
+      resourceType: ActivityResourceType.FILE,
+      resourceId: file._id,
+      resourceName: file.name,
+      metadata: { fromFolderId, toFolderId: file.folderId },
+    });
 
     return file;
   }
@@ -442,8 +490,19 @@ export class FilesService {
       );
     }
 
-    // TODO(activity): registrar FILE_UPDATE con metadata.size (delta) y
-    // resourceName.
+    // Auditoría del reemplazo de contenido, con el tamaño nuevo y el delta.
+    await this.activityService.log({
+      actorId: ownerId,
+      action: ActivityAction.FILE_UPDATE,
+      resourceType: ActivityResourceType.FILE,
+      resourceId: file._id,
+      resourceName: file.name,
+      metadata: {
+        size: file.size,
+        previousSize,
+        delta: storageDelta,
+      },
+    });
 
     return file;
   }

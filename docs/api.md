@@ -469,15 +469,88 @@ curl -X PUT http://localhost:3000/api/files/6710000000000000000000f1/content \
 
 ---
 
+## Historial de actividad
+
+Colección: `activity_log`. Es un **audit trail append-only**: los eventos solo
+se insertan, nunca se actualizan ni se eliminan. Cada evento guarda una copia de
+`actorName`, `actorRole` y `resourceName` en el momento de la acción, por lo que
+el historial sigue siendo legible aunque el usuario se desactive o el recurso se
+purgue definitivamente.
+
+Acciones registradas actualmente:
+
+- `AUTH_LOGIN` al iniciar sesión correctamente.
+- `FOLDER_CREATE`, `FOLDER_RENAME`, `FOLDER_MOVE`, `FOLDER_DELETE`.
+- `FILE_UPLOAD`, `FILE_DOWNLOAD`, `FILE_RENAME`, `FILE_MOVE`, `FILE_UPDATE`.
+
+### GET `/api/activity`
+
+Devuelve el historial del **usuario autenticado**, ordenado del evento más
+reciente al más antiguo. No se puede consultar el historial de otro usuario: el
+`actorId` sale siempre del JWT.
+
+| Query | Obligatorio | Descripción |
+|---|---|---|
+| `from` | No | Fecha/hora ISO 8601 inicial, inclusive. |
+| `to` | No | Fecha/hora ISO 8601 final, inclusive. |
+| `page` | No | Página, desde `1`. Por defecto `1`. |
+| `limit` | No | Eventos por página, de `1` a `100`. Por defecto `20`. |
+
+```http
+GET /api/activity?from=2026-10-01T00:00:00.000Z&to=2026-10-31T23:59:59.999Z&page=1&limit=20
+Authorization: Bearer <accessToken>
+```
+
+**Respuesta `200`**
+
+```json
+{
+  "items": [
+    {
+      "_id": "67500000000000000000ff01",
+      "actorId": "66f1a1c2e4b0a1b2c3d4e5f6",
+      "actorName": "Ana Torres",
+      "actorRole": "USER",
+      "action": "FILE_UPLOAD",
+      "resourceType": "FILE",
+      "resourceId": "6710000000000000000000f1",
+      "resourceName": "informe.txt",
+      "metadata": {
+        "parentId": "6700000000000000000000a1",
+        "extension": "txt",
+        "size": 4821
+      },
+      "createdAt": "2026-10-19T11:00:00.000Z"
+    }
+  ],
+  "total": 1,
+  "page": 1,
+  "limit": 20,
+  "totalPages": 1
+}
+```
+
+`items` contiene los documentos completos de `activity_log`. `total` es el
+número de eventos que cumplen el rango (no solo los de la página actual). Si no
+hay eventos, `items` es `[]` y `totalPages` es `0`.
+
+**Errores**
+
+| Código | Caso |
+|---:|---|
+| `400` | `from`/`to` no son fechas ISO 8601 válidas, `from > to`, o `page`/`limit` están fuera de rango. |
+| `401` | Falta el JWT o no es válido. |
+
+---
+
 ## Notas de implementación
 
 - **Sin transacciones** (MongoDB standalone). Las operaciones siguen un orden
   recuperable y usan compensaciones manuales para no dejar binarios huérfanos.
-- **Auditoría pendiente**: el proyecto aún no tiene `ActivityModule` (solo el
-  esquema `activity_log`). `FoldersService` y `FilesService` dejan TODOs
-  explícitos para registrar `FOLDER_*` y `FILE_UPLOAD`, `FILE_DOWNLOAD`,
-  `FILE_RENAME`, `FILE_MOVE`, `FILE_UPDATE` cuando ese módulo exista. No se
-  inventó el módulo en esta entrega.
+- **Auditoría**: `ActivityModule` escribe `FOLDER_*` y `FILE_*` en
+  `activity_log` después de que el estado del recurso ya es correcto. El login
+  registra `AUTH_LOGIN`. `activity_log` no tiene endpoints de actualización ni
+  de borrado.
 - **Archivos**: el contenido se guarda en GridFS; `users.storageUsed` se
   incrementa al subir y se ajusta al reemplazar contenido. Incluye archivos en
   papelera: solo disminuirá al purgarlos definitivamente.

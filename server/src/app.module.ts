@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 
+import { ActivityModule } from './activity/activity.module.js';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
 import { AuthModule } from './auth/auth.module.js';
@@ -25,6 +26,7 @@ import { UsersModule } from './users/users.module.js';
 
     UsersModule,
     AuthModule,
+    ActivityModule,
     FoldersModule,
     FilesModule,
   ],

@@ -5,8 +5,14 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
+import { randomUUID } from 'node:crypto';
 import { Model, Types, type QueryFilter } from 'mongoose';
 
+import {
+  ActivityAction,
+  ActivityResourceType,
+} from '../activity-log/schemas/activity-log.schema.js';
+import { ActivityService } from '../activity/activity.service.js';
 import { File } from '../files/schemas/file.schema.js';
 import { CreateFolderDto } from './dto/create-folder.dto.js';
 import { MoveFolderDto } from './dto/move-folder.dto.js';
@@ -40,6 +46,7 @@ export class FoldersService {
     // archivos; el FilesModule se implementará más adelante.
     @InjectModel(File.name)
     private readonly fileModel: Model<File>,
+    private readonly activityService: ActivityService,
   ) {}
 
   /** Crea una carpeta en la raíz o dentro de un padre activo del mismo dueño. */
@@ -83,10 +90,15 @@ export class FoldersService {
         depth,
       });
 
-      // TODO(activity): cuando exista ActivityModule/ActivityLogService,
-      // registrar FOLDER_CREATE con actorId, resourceId, resourceName y
-      // metadata.parentId. Hoy solo existe el esquema de activity_log; no se
-      // crea el módulo de actividad en esta tarea.
+      // Auditoría: el nombre se copia en el evento, no se referencia.
+      await this.activityService.log({
+        actorId: ownerId,
+        action: ActivityAction.FOLDER_CREATE,
+        resourceType: ActivityResourceType.FOLDER,
+        resourceId: folder._id,
+        resourceName: folder.name,
+        metadata: { parentId: folder.parentId },
+      });
 
       return folder;
     } catch (error) {
@@ -143,6 +155,7 @@ export class FoldersService {
     const owner = new Types.ObjectId(ownerId);
     const folder = await this.findOwnedActiveFolder(folderId, owner);
     const name = dto.name.trim();
+    const previousName = folder.name;
 
     await this.ensureSiblingNameAvailable(
       owner,
@@ -163,8 +176,16 @@ export class FoldersService {
       throw error;
     }
 
-    // TODO(activity): registrar FOLDER_RENAME cuando exista ActivityModule,
-    // con resourceId, resourceName y el nombre anterior si se desea auditar.
+    // Auditoría: se conserva el nombre anterior solo como metadata; el
+    // `resourceName` es la copia del nombre nuevo en el momento del evento.
+    await this.activityService.log({
+      actorId: ownerId,
+      action: ActivityAction.FOLDER_RENAME,
+      resourceType: ActivityResourceType.FOLDER,
+      resourceId: folder._id,
+      resourceName: folder.name,
+      metadata: { previousName },
+    });
 
     return folder;
   }
@@ -186,6 +207,7 @@ export class FoldersService {
   ): Promise<FolderDocument> {
     const owner = new Types.ObjectId(ownerId);
     const folder = await this.findOwnedActiveFolder(folderId, owner);
+    const fromParentId = folder.parentId;
 
     let newParent: FolderDocument | null = null;
 
@@ -333,8 +355,19 @@ export class FoldersService {
       )
       .exec();
 
-    // TODO(activity): registrar FOLDER_MOVE cuando exista ActivityModule con
-    // metadata.fromParentId (el `parentId` anterior) y metadata.toParentId.
+    // Auditoría del movimiento del subárbol completo.
+    await this.activityService.log({
+      actorId: ownerId,
+      action: ActivityAction.FOLDER_MOVE,
+      resourceType: ActivityResourceType.FOLDER,
+      resourceId: folder._id,
+      resourceName: folder.name,
+      metadata: {
+        fromParentId,
+        toParentId: newParentId,
+        batchId: randomUUID(),
+      },
+    });
 
     const updated = await this.folderModel.findById(folder._id).exec();
     return updated ?? folder;
@@ -423,15 +456,30 @@ export class FoldersService {
       )
       .exec();
 
-    // TODO(activity): registrar FOLDER_DELETE cuando exista ActivityModule,
-    // con metadata.affectedFolders y metadata.affectedFiles (contadores).
+    // Auditoría del borrado en cascada: se guardan contadores (nunca arrays
+    // ilimitados) y un batchId que correlaciona los eventos de la operación.
+    const affectedFolders =
+      folderResult.modifiedCount + descendantsResult.modifiedCount;
+    const affectedFiles = filesResult.modifiedCount;
+
+    await this.activityService.log({
+      actorId: ownerId,
+      action: ActivityAction.FOLDER_DELETE,
+      resourceType: ActivityResourceType.FOLDER,
+      resourceId: folder._id,
+      resourceName: folder.name,
+      metadata: {
+        batchId: randomUUID(),
+        affectedFolders,
+        affectedFiles,
+      },
+    });
 
     return {
       folderId: folder._id.toString(),
       name: folder.name,
-      affectedFolders:
-        folderResult.modifiedCount + descendantsResult.modifiedCount,
-      affectedFiles: filesResult.modifiedCount,
+      affectedFolders,
+      affectedFiles,
     };
   }
 

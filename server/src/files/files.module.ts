@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 
+import { ActivityModule } from '../activity/activity.module.js';
 import { Folder, FolderSchema } from '../folders/schemas/folder.schema.js';
 import { User, UserSchema } from '../users/schemas/user.schema.js';
 import { FilesController } from './files.controller.js';
@@ -15,6 +16,8 @@ import { File, FileSchema } from './schemas/file.schema.js';
       { name: Folder.name, schema: FolderSchema },
       { name: User.name, schema: UserSchema },
     ]),
+    // Registro de FILE_UPLOAD/DOWNLOAD/RENAME/MOVE/UPDATE.
+    ActivityModule,
   ],
   controllers: [FilesController],
   providers: [FilesService],

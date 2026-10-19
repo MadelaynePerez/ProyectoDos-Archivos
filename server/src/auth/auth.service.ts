@@ -1,6 +1,11 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 
+import {
+  ActivityAction,
+  ActivityResourceType,
+} from '../activity-log/schemas/activity-log.schema.js';
+import { ActivityService } from '../activity/activity.service.js';
 import { UsersService } from '../users/users.service.js';
 import { LoginDto } from './dto/login.dto.js';
 import { RegisterDto } from './dto/register.dto.js';
@@ -11,6 +16,7 @@ export class AuthService {
   constructor(
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
+    private readonly activityService: ActivityService,
   ) {}
 
   /** Alta pública: siempre delega en createUser, que fuerza el rol USER. */
@@ -50,6 +56,19 @@ export class AuthService {
     // Se registra el último login correcto.
     user.lastLoginAt = new Date();
     await user.save();
+
+    // Auditoría: el login ya está validado (credenciales y cuenta activa).
+    // Se envían nombre y rol para no volver a consultar `users`; así el evento
+    // guarda la copia exacta que tenía el usuario en este instante.
+    await this.activityService.log({
+      actorId: user._id,
+      actorName: user.name,
+      actorRole: user.role,
+      action: ActivityAction.AUTH_LOGIN,
+      resourceType: ActivityResourceType.AUTH,
+      resourceId: user._id,
+      resourceName: user.email,
+    });
 
     const payload: JwtPayload = {
       sub: user._id.toString(),
