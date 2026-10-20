@@ -976,6 +976,350 @@ hay eventos, `items` es `[]` y `totalPages` es `0`.
 
 ---
 
+## Reportes
+
+Base: `/api/reports`. Todos los endpoints requieren un JWT válido
+(`Authorization: Bearer <accessToken>`).
+
+Los reportes se calculan **exclusivamente con aggregation pipelines** de
+MongoDB. El servidor no trae documentos para contarlos o agruparlos en
+JavaScript.
+
+### Alcance y reglas de acceso
+
+| Rol | Alcance |
+|---|---|
+| `ADMIN` | Datos globales y de cualquier usuario. |
+| `USER` | Solo sus propios datos. Los reportes de archivos se filtran por `ownerId` y los de actividad por `actorId`. |
+
+Reglas comunes:
+
+- En los reportes con `userId`, un `USER` que envíe el id de otro usuario
+  recibe **403**. Si `userId` se omite, se usa el usuario autenticado.
+- Un `ADMIN` puede enviar cualquier `userId`.
+- Los reportes de **recursos vivos** (`files-by-type`, `files-by-date-range`,
+  `top-users-by-files`, `users-most-shared`, `files-most-shared`,
+  `shared-by-user`, `received-by-user`) excluyen `isDeleted: true`.
+- Los reportes de **auditoría** (`files-most-operations`, `user-activity`,
+  `operations-by-type`, `operations-by-period`, `top-actions`) no filtran
+  recursos existentes: usan `resourceName` y `actorName` como snapshots para
+  conservar el historial aunque el recurso o el usuario hayan sido purgados.
+- `from` y `to` son fechas ISO 8601. El rango es inclusivo en ambos extremos y
+  se aplica sobre `createdAt` en UTC. Si `from > to`, responde `400`.
+- `granularity` solo acepta `day` o `month`; por defecto es `day`.
+- Los importes de tamaño se expresan en bytes.
+
+Errores comunes:
+
+| Código | Caso |
+|---:|---|
+| `400` | Fecha inválida, rango invertido, `userId` inválido o `granularity` no permitida. |
+| `401` | Falta el JWT o no es válido. |
+| `403` | Un `USER` intenta consultar datos de otro usuario. |
+
+---
+
+### GET `/api/reports/files-by-type`
+
+Cantidad y tamaño total de archivos vivos por extensión. `ADMIN` ve todo el
+sistema; `USER` solo sus archivos.
+
+**Respuesta `200`**
+
+```json
+[
+  { "extension": "md", "count": 1, "totalSize": 7 },
+  { "extension": "txt", "count": 2, "totalSize": 9 }
+]
+```
+
+Ordenado por extensión ascendente.
+
+---
+
+### GET `/api/reports/files-by-date-range?from=&to=`
+
+Archivos vivos creados dentro del rango. `from` y `to` son opcionales, pero si
+se envían deben ser ISO 8601 válidos.
+
+| Query | Obligatorio | Descripción |
+|---|---:|---|
+| `from` | No | Límite inferior inclusivo sobre `createdAt`. |
+| `to` | No | Límite superior inclusivo sobre `createdAt`. |
+
+**Respuesta `200`**: array de archivos ordenado por `createdAt` descendente.
+
+```json
+[
+  {
+    "_id": "6710000000000000000000f1",
+    "name": "informe.txt",
+    "extension": "txt",
+    "size": 4821,
+    "ownerId": "66f1a1c2e4b0a1b2c3d4e5f6",
+    "folderId": "6700000000000000000000a1",
+    "createdAt": "2026-10-19T11:00:00.000Z"
+  }
+]
+```
+
+---
+
+### GET `/api/reports/files-most-operations`
+
+Archivos con más eventos registrados en `activity_log`. Se agrupa por
+`resourceId` y se usa `resourceName` como snapshot; por eso el reporte puede
+incluir archivos que hoy están en papelera o fueron purgados.
+
+Para un `USER`, solo se cuentan los eventos cuyo `actorId` es el usuario
+autenticado. `ADMIN` ve la actividad global.
+
+**Respuesta `200`**
+
+```json
+[
+  {
+    "resourceId": "6710000000000000000000f1",
+    "resourceName": "informe.txt",
+    "operations": 15
+  }
+]
+```
+
+Ordenado por `operations` descendente.
+
+---
+
+### GET `/api/reports/top-users-by-files`
+
+Top 10 de usuarios por cantidad de archivos vivos. `ADMIN` ve el ranking
+global; `USER` solo su propia fila.
+
+**Respuesta `200`**
+
+```json
+[
+  {
+    "userId": "66f1a1c2e4b0a1b2c3d4e5f6",
+    "name": "Ana Torres",
+    "email": "ana.torres@example.com",
+    "files": 3,
+    "totalSize": 16
+  }
+]
+```
+
+Ordenado por `files` descendente y, en empate, por `totalSize` descendente.
+
+---
+
+### GET `/api/reports/users-most-shared`
+
+Usuarios con más recursos compartidos. Solo cuenta permisos explícitos de
+recursos vivos.
+
+- `shares`: número de permisos concedidos.
+- `sharedResources`: número de recursos distintos (un recurso compartido con
+  varios usuarios cuenta una sola vez).
+
+Para un `USER`, solo se consideran los shares cuyo `ownerId` es el usuario
+autenticado.
+
+**Respuesta `200`**
+
+```json
+[
+  {
+    "userId": "66f1a1c2e4b0a1b2c3d4e5f6",
+    "name": "Ana Torres",
+    "email": "ana.torres@example.com",
+    "shares": 4,
+    "sharedResources": 3
+  }
+]
+```
+
+Ordenado por `sharedResources` descendente y luego por `shares` descendente.
+
+---
+
+### GET `/api/reports/files-most-shared`
+
+Archivos vivos compartidos con más usuarios distintos. Solo considera shares
+con `resourceType: "FILE"` y recursos activos.
+
+Para un `USER`, solo se consideran los shares concedidos por él mismo.
+
+**Respuesta `200`**
+
+```json
+[
+  {
+    "fileId": "6710000000000000000000f1",
+    "name": "informe.txt",
+    "extension": "txt",
+    "ownerId": "66f1a1c2e4b0a1b2c3d4e5f6",
+    "ownerName": "Ana Torres",
+    "sharedWith": 2
+  }
+]
+```
+
+`sharedWith` es el número de destinatarios distintos. Ordenado por
+`sharedWith` descendente.
+
+---
+
+### GET `/api/reports/shared-by-user?userId=`
+
+Recursos que un usuario ha compartido (shares con `ownerId = userId`).
+Devuelve solo recursos vivos y resuelve el nombre actual del archivo o carpeta.
+
+| Query | Obligatorio | Descripción |
+|---|---:|---|
+| `userId` | No | Usuario objetivo. Si se omite, se usa el autenticado. |
+
+**Respuesta `200`**
+
+```json
+[
+  {
+    "shareId": "67400000000000000000ee01",
+    "resourceType": "FOLDER",
+    "resourceId": "6700000000000000000000a2",
+    "resourceName": "2026",
+    "access": "READ",
+    "owner": {
+      "_id": "66f1a1c2e4b0a1b2c3d4e5f6",
+      "name": "Ana Torres",
+      "email": "ana.torres@example.com"
+    },
+    "grantee": {
+      "_id": "66f1a1c2e4b0a1b2c3d4e5f7",
+      "name": "Luis Gómez",
+      "email": "luis@example.com"
+    },
+    "createdAt": "2026-10-05T15:00:00.000Z",
+    "updatedAt": "2026-10-05T15:00:00.000Z"
+  }
+]
+```
+
+Ordenado del más reciente al más antiguo. Un `USER` que envíe otro `userId`
+recibe `403`.
+
+---
+
+### GET `/api/reports/received-by-user?userId=`
+
+Recursos que un usuario ha recibido (shares con `granteeId = userId`). Mismo
+formato y reglas de acceso que `shared-by-user`.
+
+| Query | Obligatorio | Descripción |
+|---|---:|---|
+| `userId` | No | Usuario objetivo. Si se omite, se usa el autenticado. |
+
+**Respuesta `200`**: array con el mismo formato que `shared-by-user`, filtrado
+por `granteeId`. Solo incluye recursos vivos.
+
+---
+
+### GET `/api/reports/user-activity?userId=&from=&to=`
+
+Historial de un usuario en un rango de fechas. Devuelve los documentos de
+`activity_log` ordenados del evento más reciente al más antiguo.
+
+| Query | Obligatorio | Descripción |
+|---|---:|---|
+| `userId` | No | Usuario objetivo. Si se omite, se usa el autenticado. |
+| `from` | No | Límite inferior inclusivo sobre `createdAt`. |
+| `to` | No | Límite superior inclusivo sobre `createdAt`. |
+
+**Respuesta `200`**
+
+```json
+[
+  {
+    "_id": "67500000000000000000ff01",
+    "actorId": "66f1a1c2e4b0a1b2c3d4e5f6",
+    "actorName": "Ana Torres",
+    "actorRole": "USER",
+    "action": "FILE_UPLOAD",
+    "resourceType": "FILE",
+    "resourceId": "6710000000000000000000f1",
+    "resourceName": "informe.txt",
+    "metadata": {
+      "parentId": "6700000000000000000000a1",
+      "extension": "txt",
+      "size": 4821
+    },
+    "createdAt": "2026-10-19T11:00:00.000Z"
+  }
+]
+```
+
+Un `USER` que envíe otro `userId` recibe `403`.
+
+---
+
+### GET `/api/reports/operations-by-type`
+
+Operaciones agrupadas por acción. Para un `USER`, solo sus propios eventos
+(`actorId`); `ADMIN` ve el total global.
+
+**Respuesta `200`**
+
+```json
+[
+  { "action": "FILE_UPLOAD", "count": 28 },
+  { "action": "FILE_DOWNLOAD", "count": 10 }
+]
+```
+
+Ordenado por `count` descendente.
+
+---
+
+### GET `/api/reports/operations-by-period?granularity=day|month`
+
+Operaciones agrupadas por período con `$dateTrunc` sobre `createdAt`, en UTC.
+
+| Query | Obligatorio | Descripción |
+|---|---:|---|
+| `granularity` | No | `day` (por defecto) o `month`. |
+
+**Respuesta `200`**
+
+```json
+[
+  { "period": "2026-10-01T00:00:00.000Z", "count": 35 },
+  { "period": "2026-10-02T00:00:00.000Z", "count": 12 }
+]
+```
+
+Con `granularity=month`, el período se normaliza al primer día del mes. Para un
+`USER`, solo se cuentan sus propios eventos.
+
+---
+
+### GET `/api/reports/top-actions`
+
+Top 10 de acciones, desglosadas por tipo de recurso. Para un `USER`, solo sus
+propios eventos.
+
+**Respuesta `200`**
+
+```json
+[
+  { "action": "FILE_UPLOAD", "resourceType": "FILE", "count": 28 },
+  { "action": "SHARE_GRANT", "resourceType": "SHARE", "count": 17 }
+]
+```
+
+Ordenado por `count` descendente.
+
+---
+
 ## Notas de implementación
 
 - **Sin transacciones** (MongoDB standalone). Las operaciones siguen un orden
