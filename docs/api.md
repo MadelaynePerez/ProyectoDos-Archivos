@@ -3,6 +3,24 @@
 > Contrato HTTP para el frontend Angular.
 > Base URL: `http://localhost:3000/api`.
 
+## Datos de prueba del seed
+
+El script `npm run seed` (en `server/`) **elimina la base `gestion_documental`**
+y la vuelve a crear con datos reproducibles: 3 usuarios, 24 carpetas, 50
+archivos `.txt`/`.md` en GridFS, 33 comparticiones, recursos en papelera e
+historial de actividad.
+
+Credenciales conocidas:
+
+| Rol | Email | Contraseña | Nombre |
+|---|---|---|---|
+| `ADMIN` | `admin@example.com` | `Admin123!` | María Fernández |
+| `USER` | `ana.torres@example.com` | `Ana123!` | Ana Torres |
+| `USER` | `luis@example.com` | `Luis123!` | Luis Gómez |
+
+Las contraseñas se guardan únicamente como hash bcrypt en `users.passwordHash`.
+En el entorno local se pueden usar directamente en `POST /api/auth/login`.
+
 ## Autenticación
 
 Todos los endpoints de carpetas y archivos requieren un JWT válido:
