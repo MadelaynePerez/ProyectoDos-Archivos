@@ -16,61 +16,75 @@ export const routes: Routes = [
     path: 'login',
     title: 'Iniciar sesión · Gestión Documental',
     loadComponent: () =>
-      import('./features/auth/login/login.page').then((m) => m.LoginPage),
+      import('./pages/login/list-login/list-login.component').then(
+        (m) => m.ListLoginComponent,
+      ),
   },
   {
     path: '',
     canActivate: [authGuard],
     loadComponent: () =>
-      import('./layout/layout.component').then((m) => m.LayoutComponent),
+      import('./shared/layout/layout.component').then(
+        (m) => m.LayoutComponent,
+      ),
     children: [
       { path: '', pathMatch: 'full', redirectTo: 'files' },
       {
         path: 'files',
         title: 'Mis archivos · Gestión Documental',
         loadComponent: () =>
-          import('./features/files/files.page').then((m) => m.FilesPage),
+          import('./pages/files/list-files/list-files.component').then(
+            (m) => m.ListFilesComponent,
+          ),
       },
       {
         path: 'shared-with-me',
         title: 'Compartido conmigo · Gestión Documental',
         loadComponent: () =>
-          import('./features/shared-with-me/shared-with-me.page').then(
-            (m) => m.SharedWithMePage,
-          ),
+          import(
+            './pages/shared-with-me/list-shared-with-me/list-shared-with-me.component'
+          ).then((m) => m.ListSharedWithMeComponent),
       },
       {
         path: 'shared-by-me',
         title: 'Compartido por mí · Gestión Documental',
         loadComponent: () =>
-          import('./features/shared-by-me/shared-by-me.page').then(
-            (m) => m.SharedByMePage,
-          ),
+          import(
+            './pages/shared-by-me/list-shared-by-me/list-shared-by-me.component'
+          ).then((m) => m.ListSharedByMeComponent),
       },
       {
         path: 'trash',
         title: 'Papelera · Gestión Documental',
         loadComponent: () =>
-          import('./features/trash/trash.page').then((m) => m.TrashPage),
+          import('./pages/trash/list-trash/list-trash.component').then(
+            (m) => m.ListTrashComponent,
+          ),
       },
       {
         path: 'activity',
         title: 'Actividad · Gestión Documental',
         loadComponent: () =>
-          import('./features/activity/activity.page').then((m) => m.ActivityPage),
+          import('./pages/activity/list-activity/list-activity.component').then(
+            (m) => m.ListActivityComponent,
+          ),
       },
       {
         path: 'reports',
         title: 'Reportes · Gestión Documental',
         loadComponent: () =>
-          import('./features/reports/reports.page').then((m) => m.ReportsPage),
+          import('./pages/reports/list-reports/list-reports.component').then(
+            (m) => m.ListReportsComponent,
+          ),
       },
       {
         path: 'users',
         title: 'Usuarios · Gestión Documental',
         canActivate: [adminGuard],
         loadComponent: () =>
-          import('./features/users/users.page').then((m) => m.UsersPage),
+          import('./pages/users/list-users/list-users.component').then(
+            (m) => m.ListUsersComponent,
+          ),
       },
     ],
   },

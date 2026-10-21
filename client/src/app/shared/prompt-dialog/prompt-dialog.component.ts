@@ -35,55 +35,8 @@ export interface PromptDialogData {
     MatInputModule,
     MatButtonModule,
   ],
-  template: `
-    <h2 mat-dialog-title>{{ data.title }}</h2>
-
-    <form (ngSubmit)="submit()">
-      <mat-dialog-content>
-        @if (data.message) {
-          <p class="dialog-message">{{ data.message }}</p>
-        }
-
-        <mat-form-field appearance="outline" class="full-width">
-          <mat-label>{{ data.label ?? 'Texto' }}</mat-label>
-          <input
-            matInput
-            cdkFocusInitial
-            [formControl]="control"
-            [placeholder]="data.placeholder ?? ''"
-            [attr.maxlength]="data.maxLength ?? null"
-          />
-          @if (control.hasError('required')) {
-            <mat-error>Este campo es obligatorio.</mat-error>
-          }
-          @if (control.hasError('maxlength')) {
-            <mat-error>
-              No puede superar {{ data.maxLength }} caracteres.
-            </mat-error>
-          }
-        </mat-form-field>
-      </mat-dialog-content>
-
-      <mat-dialog-actions align="end">
-        <button mat-button type="button" (click)="cancel()">
-          {{ data.cancelText ?? 'Cancelar' }}
-        </button>
-        <button mat-flat-button type="submit" [disabled]="control.invalid">
-          {{ data.confirmText ?? 'Aceptar' }}
-        </button>
-      </mat-dialog-actions>
-    </form>
-  `,
-  styles: `
-    .full-width {
-      width: 100%;
-    }
-
-    .dialog-message {
-      margin: 0 0 1rem;
-      color: var(--mat-sys-on-surface-variant);
-    }
-  `,
+  templateUrl: './prompt-dialog.component.html',
+  styleUrl: './prompt-dialog.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class PromptDialogComponent {

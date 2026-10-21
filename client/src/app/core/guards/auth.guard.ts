@@ -1,7 +1,7 @@
 import { inject } from '@angular/core';
 import { Router, type CanActivateFn } from '@angular/router';
 
-import { AuthService } from '../auth/auth.service';
+import { AuthService } from '../services/auth.service';
 
 /**
  * Protege las rutas privadas.
