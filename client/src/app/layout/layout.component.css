@@ -1,0 +1,142 @@
+.app-shell {
+  height: 100dvh;
+  background: var(--mat-sys-surface-container-low);
+}
+
+.app-sidenav {
+  width: 16.5rem;
+  border-radius: 0;
+  background: var(--mat-sys-surface);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1.25rem 1rem;
+}
+
+.brand-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.75rem;
+  background: var(--mat-sys-primary-container);
+  color: var(--mat-sys-on-primary-container);
+  flex-shrink: 0;
+}
+
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.brand-text strong {
+  font: var(--mat-sys-title-small);
+}
+
+.brand-text small {
+  color: var(--mat-sys-on-surface-variant);
+  font: var(--mat-sys-body-small);
+}
+
+.app-nav {
+  padding-top: 0.5rem;
+}
+
+.app-nav a {
+  border-radius: 0 1.5rem 1.5rem 0;
+  margin-right: 0.5rem;
+}
+
+.active-link {
+  background: var(--mat-sys-secondary-container);
+  color: var(--mat-sys-on-secondary-container);
+}
+
+.app-content {
+  display: flex;
+  flex-direction: column;
+}
+
+.app-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  gap: 0.5rem;
+  background: var(--mat-sys-surface);
+  border-bottom: 1px solid var(--mat-sys-outline-variant);
+}
+
+.toolbar-title {
+  font: var(--mat-sys-title-medium);
+}
+
+.spacer {
+  flex: 1 1 auto;
+}
+
+.user-info {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+}
+
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  background: var(--mat-sys-primary);
+  color: var(--mat-sys-on-primary);
+  font: var(--mat-sys-label-large);
+  flex-shrink: 0;
+}
+
+.user-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+.user-name {
+  font: var(--mat-sys-label-large);
+}
+
+.user-role {
+  color: var(--mat-sys-on-surface-variant);
+  font: var(--mat-sys-body-small);
+}
+
+.toolbar-divider {
+  height: 1.75rem;
+  margin-inline: 0.25rem;
+}
+
+.page-content {
+  flex: 1 1 auto;
+  padding: 1.5rem;
+  box-sizing: border-box;
+  overflow: auto;
+}
+
+@media (max-width: 720px) {
+  .toolbar-title,
+  .user-text,
+  .toolbar-divider {
+    display: none;
+  }
+
+  .page-content {
+    padding: 1rem;
+  }
+
+  .logout-label {
+    display: none;
+  }
+}

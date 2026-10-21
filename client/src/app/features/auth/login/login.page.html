@@ -1,0 +1,82 @@
+<div class="login-wrapper">
+  <mat-card appearance="outlined" class="login-card">
+    <div class="brand">
+      <div class="brand-icon">
+        <mat-icon>folder_copy</mat-icon>
+      </div>
+      <h1>Gestión Documental</h1>
+      <p>Inicia sesión para acceder a tus archivos y carpetas.</p>
+    </div>
+
+    <form [formGroup]="form" (ngSubmit)="submit()" novalidate>
+      <mat-form-field appearance="outline" class="full-width">
+        <mat-label>Correo electrónico</mat-label>
+        <mat-icon matPrefix>mail</mat-icon>
+        <input
+          matInput
+          type="email"
+          formControlName="email"
+          autocomplete="email"
+          placeholder="usuario@example.com"
+          (input)="clearError()"
+        />
+        @if (form.controls.email.hasError('required')) {
+          <mat-error>El correo es obligatorio.</mat-error>
+        }
+        @if (form.controls.email.hasError('email')) {
+          <mat-error>Ingresa un correo electrónico válido.</mat-error>
+        }
+      </mat-form-field>
+
+      <mat-form-field appearance="outline" class="full-width">
+        <mat-label>Contraseña</mat-label>
+        <mat-icon matPrefix>lock</mat-icon>
+        <input
+          matInput
+          [type]="hidePassword() ? 'password' : 'text'"
+          formControlName="password"
+          autocomplete="current-password"
+          (input)="clearError()"
+        />
+        <button
+          mat-icon-button
+          matSuffix
+          type="button"
+          [attr.aria-label]="hidePassword() ? 'Mostrar contraseña' : 'Ocultar contraseña'"
+          (click)="hidePassword.set(!hidePassword())"
+        >
+          <mat-icon>
+            {{ hidePassword() ? 'visibility' : 'visibility_off' }}
+          </mat-icon>
+        </button>
+        @if (form.controls.password.hasError('required')) {
+          <mat-error>La contraseña es obligatoria.</mat-error>
+        }
+      </mat-form-field>
+
+      @if (errorMessage(); as message) {
+        <div class="error-box" role="alert">
+          <mat-icon>error_outline</mat-icon>
+          <span>{{ message }}</span>
+        </div>
+      }
+
+      <button
+        mat-flat-button
+        color="primary"
+        type="submit"
+        class="submit-button"
+        [disabled]="loading()"
+      >
+        @if (loading()) {
+          <mat-spinner diameter="20" />
+          <span>Ingresando…</span>
+        } @else {
+          <span>Ingresar</span>
+        }
+      </button>
+    </form>
+  </mat-card>
+
+  <p class="footer-note">Sistema de Gestión Documental · Angular + NestJS</p>
+</div>

@@ -32,6 +32,124 @@ Authorization: Bearer <accessToken>
 El dueño de la carpeta o archivo se obtiene **siempre** del token
 (`request.user`). El cliente nunca envía `ownerId` en el body.
 
+El token se firma con `JWT_SECRET` y su vigencia se configura con
+`JWT_EXPIRES_IN` (`1h` por defecto en `.env`). En cada request el servidor
+vuelve a consultar el usuario: si fue desactivado o eliminado, el token deja de
+ser válido y la respuesta es `401`.
+
+### POST `/api/auth/login`
+
+Inicia sesión y devuelve el JWT junto con los datos públicos del usuario. El
+email se normaliza a minúsculas y sin espacios antes de compararlo.
+
+**Body**
+
+| Campo | Tipo | Obligatorio | Descripción |
+|---|---|---:|---|
+| `email` | `string` | Sí | Email registrado. Debe ser una dirección válida. |
+| `password` | `string` | Sí | Contraseña en texto plano. |
+
+```json
+{
+  "email": "ana.torres@example.com",
+  "password": "Ana123!"
+}
+```
+
+**Respuesta `200`**
+
+```json
+{
+  "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "user": {
+    "_id": "66f1a1c2e4b0a1b2c3d4e5f6",
+    "email": "ana.torres@example.com",
+    "name": "Ana Torres",
+    "role": "USER",
+    "isActive": true,
+    "storageUsed": 48213,
+    "lastLoginAt": "2026-10-21T12:00:00.000Z",
+    "createdAt": "2026-10-01T08:00:00.000Z",
+    "updatedAt": "2026-10-21T12:00:00.000Z"
+  }
+}
+```
+
+El login correcto registra `AUTH_LOGIN` en el historial de actividad y
+actualiza `lastLoginAt` antes de responder.
+
+**Errores**
+
+| Código | Caso |
+|---:|---|
+| `400` | `email` o `password` ausentes o con formato inválido. |
+| `401` | Credenciales inválidas (`Credenciales inválidas`) o cuenta desactivada (`La cuenta está desactivada`). |
+
+### POST `/api/auth/register`
+
+Registro público. Siempre crea un usuario con rol `USER`: cualquier `role`
+enviado en el body se descarta. **No devuelve token**; después del registro hay
+que llamar a `POST /api/auth/login`.
+
+**Body**
+
+| Campo | Tipo | Obligatorio | Descripción |
+|---|---|---:|---|
+| `email` | `string` | Sí | Email único. Se normaliza a minúsculas y sin espacios. |
+| `name` | `string` | Sí | Nombre visible, máximo 120 caracteres. |
+| `password` | `string` | Sí | Entre 8 y 72 caracteres. |
+
+```json
+{
+  "email": "nuevo@example.com",
+  "name": "Nuevo Usuario",
+  "password": "Secreto123!"
+}
+```
+
+**Respuesta `201`**
+
+```json
+{
+  "_id": "6700000000000000000000c1",
+  "email": "nuevo@example.com",
+  "name": "Nuevo Usuario",
+  "role": "USER",
+  "isActive": true,
+  "storageUsed": 0,
+  "lastLoginAt": null,
+  "createdAt": "2026-10-21T12:00:00.000Z",
+  "updatedAt": "2026-10-21T12:00:00.000Z"
+}
+```
+
+La contraseña se guarda solo como hash bcrypt en `passwordHash`; ese campo
+nunca aparece en las respuestas.
+
+**Errores**
+
+| Código | Caso |
+|---:|---|
+| `400` | Email inválido, `name` vacío o contraseña fuera del rango 8–72. |
+| `409` | El email ya está registrado. |
+
+### Respuesta de autenticación
+
+Solo `POST /api/auth/login` devuelve `accessToken`. El cliente debe:
+
+1. Guardar `accessToken` y `user` (por ejemplo, en `localStorage`).
+2. Enviar `Authorization: Bearer <accessToken>` en cada request protegido.
+3. Tratar cualquier `401` como sesión inválida: borrar el token y volver al
+   login.
+
+El objeto `user` es el documento público de `users`: incluye `_id`, `email`,
+`name`, `role` (`ADMIN` o `USER`), `isActive`, `storageUsed`, `lastLoginAt`,
+`createdAt` y `updatedAt`. Nunca incluye `passwordHash`.
+
+El JWT contiene `sub` (id del usuario), `email` y `role`; el rol se vuelve a
+leer de la base de datos en cada request, por lo que un cambio de rol o una
+desactivación surten efecto de inmediato.
+
 ### Política de visibilidad
 
 - Una carpeta que no existe, está en papelera o pertenece a otro usuario
@@ -44,6 +162,99 @@ El dueño de la carpeta o archivo se obtiene **siempre** del token
   también es **404**: el recurso "no existe" para ese usuario.
 - La herencia de permisos y el detalle de cada nivel se describen en
   [Comparticiones](#comparticiones).
+
+---
+
+## Usuarios
+
+Panel de administración. **Todos los endpoints de este módulo requieren JWT y
+rol `ADMIN`**: sin token la respuesta es `401`; con un token de rol `USER`, `403`.
+
+### GET `/api/users`
+
+Lista todos los usuarios, ordenados del alta más reciente al más antiguo
+(`createdAt` descendente). Incluye usuarios activos e inactivos.
+
+```http
+GET /api/users
+Authorization: Bearer <accessToken>
+```
+
+**Respuesta `200`**
+
+```json
+[
+  {
+    "_id": "66f1a1c2e4b0a1b2c3d4e5f6",
+    "email": "ana.torres@example.com",
+    "name": "Ana Torres",
+    "role": "USER",
+    "isActive": true,
+    "storageUsed": 48213,
+    "lastLoginAt": "2026-10-21T12:00:00.000Z",
+    "createdAt": "2026-10-01T08:00:00.000Z",
+    "updatedAt": "2026-10-21T12:00:00.000Z"
+  }
+]
+```
+
+Nunca se devuelve `passwordHash`. Si no hay usuarios, devuelve `[]`.
+
+**Errores**
+
+| Código | Caso |
+|---:|---|
+| `401` | Falta el JWT o no es válido. |
+| `403` | El usuario autenticado no es `ADMIN`. |
+
+### PATCH `/api/users/:id`
+
+Actualiza el rol y/o el estado de un usuario. Es la única vía para
+activar/desactivar cuentas o promover/degradar roles. Deliberadamente **no**
+permite cambiar `email`, contraseña ni `storageUsed`.
+
+**Body**
+
+| Campo | Tipo | Obligatorio | Descripción |
+|---|---|---:|---|
+| `role` | `string` | No | `ADMIN` o `USER`. |
+| `isActive` | `boolean` | No | `true` activa la cuenta; `false` impide el login. |
+
+```json
+{
+  "role": "ADMIN",
+  "isActive": true
+}
+```
+
+Se puede enviar solo uno de los dos campos. Desactivar un usuario no borra sus
+recursos, sus comparticiones ni su historial; solo impide que inicie sesión y
+invalida sus tokens en la siguiente petición.
+
+**Respuesta `200`**: documento público actualizado del usuario.
+
+```json
+{
+  "_id": "66f1a1c2e4b0a1b2c3d4e5f6",
+  "email": "ana.torres@example.com",
+  "name": "Ana Torres",
+  "role": "ADMIN",
+  "isActive": true,
+  "storageUsed": 48213,
+  "lastLoginAt": "2026-10-21T12:00:00.000Z",
+  "createdAt": "2026-10-01T08:00:00.000Z",
+  "updatedAt": "2026-10-21T12:05:00.000Z"
+}
+```
+
+**Errores**
+
+| Código | Caso |
+|---:|---|
+| `400` | `role` no es `ADMIN`/`USER` o `isActive` no es booleano. |
+| `401` | Falta el JWT o no es válido. |
+| `403` | El usuario autenticado no es `ADMIN`. |
+| `404` | El `:id` no es un ObjectId válido o el usuario no existe. |
 
 ---
 
