@@ -9,6 +9,13 @@
     </div>
 
     <form [formGroup]="form" (ngSubmit)="submit()" novalidate>
+      @if (successMessage(); as message) {
+        <div class="success-box" role="status">
+          <mat-icon>check_circle</mat-icon>
+          <span>{{ message }}</span>
+        </div>
+      }
+
       <mat-form-field appearance="outline" class="full-width">
         <mat-label>Correo electrónico</mat-label>
         <mat-icon matPrefix>mail</mat-icon>
@@ -76,6 +83,11 @@
         }
       </button>
     </form>
+
+    <p class="auth-switch">
+      ¿No tienes cuenta?
+      <a mat-button routerLink="/register">Crear cuenta</a>
+    </p>
   </mat-card>
 
   <p class="footer-note">Sistema de Gestión Documental · Angular + NestJS</p>

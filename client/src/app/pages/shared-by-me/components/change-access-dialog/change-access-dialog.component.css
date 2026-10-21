@@ -1,0 +1,9 @@
+.dialog-message {
+  margin: 0 0 1rem;
+  color: var(--mat-sys-on-surface-variant);
+  line-height: 1.5;
+}
+
+.full-width {
+  width: 100%;
+}

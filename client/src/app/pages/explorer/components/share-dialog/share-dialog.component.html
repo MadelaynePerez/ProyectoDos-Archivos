@@ -1,0 +1,101 @@
+<h2 mat-dialog-title>Compartir {{ data.resourceType === 'FOLDER' ? 'carpeta' : 'archivo' }}</h2>
+
+<mat-dialog-content>
+  <p class="dialog-message">
+    Administra quién puede acceder a <strong>{{ data.resourceName }}</strong
+    >.
+  </p>
+
+  <form class="share-form" (ngSubmit)="grant()">
+    <div class="form-row">
+      <mat-form-field appearance="outline" subscriptSizing="dynamic">
+        <mat-label>Email del destinatario</mat-label>
+        <mat-icon matPrefix>mail</mat-icon>
+        <input
+          matInput
+          cdkFocusInitial
+          type="email"
+          autocomplete="email"
+          placeholder="usuario@example.com"
+          [formControl]="email"
+        />
+        @if (email.hasError('required')) {
+          <mat-error>El email es obligatorio.</mat-error>
+        }
+        @if (email.hasError('email')) {
+          <mat-error>Ingresa un email válido.</mat-error>
+        }
+      </mat-form-field>
+
+      <mat-form-field appearance="outline" subscriptSizing="dynamic" class="access-field">
+        <mat-label>Nivel de acceso</mat-label>
+        <mat-select [formControl]="access">
+          @for (option of accessOptions; track option.value) {
+            <mat-option [value]="option.value">{{ option.label }}</mat-option>
+          }
+        </mat-select>
+      </mat-form-field>
+
+      <button
+        mat-flat-button
+        type="submit"
+        class="grant-button"
+        [disabled]="email.invalid || saving()"
+      >
+        <mat-icon>person_add</mat-icon>
+        {{ saving() ? 'Compartiendo…' : 'Compartir' }}
+      </button>
+    </div>
+  </form>
+
+  <section class="current-shares">
+    <h3>Permisos actuales</h3>
+
+    @if (loading()) {
+      <mat-progress-bar mode="indeterminate" aria-label="Cargando permisos" />
+    } @else if (currentShares().length === 0) {
+      <p class="empty-message">Este recurso todavía no está compartido con nadie.</p>
+    } @else {
+      <div class="share-list">
+        @for (share of currentShares(); track share._id) {
+          <div class="share-row">
+            <div class="share-user">
+              <strong>{{ share.grantee?.name ?? 'Usuario' }}</strong>
+              <span>{{ share.grantee?.email ?? '—' }}</span>
+            </div>
+
+            <mat-form-field appearance="outline" subscriptSizing="dynamic" class="access-field">
+              <mat-label>Permiso</mat-label>
+              <mat-select
+                [value]="share.access"
+                [disabled]="busyShareId() === share._id"
+                (selectionChange)="changeAccess(share, $event.value)"
+              >
+                @for (option of accessOptions; track option.value) {
+                  <mat-option [value]="option.value">
+                    {{ option.label }}
+                  </mat-option>
+                }
+              </mat-select>
+            </mat-form-field>
+
+            <button
+              mat-icon-button
+              type="button"
+              color="warn"
+              [attr.aria-label]="'Retirar permiso a ' + (share.grantee?.name ?? 'usuario')"
+              [disabled]="busyShareId() === share._id"
+              (click)="revoke(share)"
+            >
+              <mat-icon>person_remove</mat-icon>
+            </button>
+          </div>
+        }
+      </div>
+    }
+  </section>
+</mat-dialog-content>
+
+<mat-dialog-actions align="end">
+  <button mat-button type="button" (click)="close()">Cerrar</button>
+</mat-dialog-actions>

@@ -1,5 +1,24 @@
-<app-section-placeholder
-  title="Compartido por mí"
-  description="Aquí administrarás los permisos READ, COMMENT y EDIT que has concedido sobre tus recursos."
-  icon="call_made"
-/>
+<section class="shared-page">
+  <header class="page-header">
+    <div class="page-heading">
+      <h1>Compartido por mí</h1>
+      <p class="page-subtitle">
+        Permisos READ, COMMENT y EDIT que has concedido sobre tus recursos.
+      </p>
+    </div>
+  </header>
+
+  @if (loading()) {
+    <mat-progress-bar mode="indeterminate" aria-label="Cargando permisos" />
+  }
+
+  <mat-card appearance="outlined" class="table-card">
+    <app-data-table
+      [columns]="columns"
+      [rows]="rows()"
+      [actions]="actions"
+      [emptyMessage]="emptyMessage"
+      (actionSelected)="onAction($event)"
+    />
+  </mat-card>
+</section>

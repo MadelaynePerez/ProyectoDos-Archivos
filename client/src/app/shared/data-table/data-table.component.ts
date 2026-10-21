@@ -71,6 +71,14 @@ export class DataTableComponent {
   /** Acciones por fila; si está vacío no se muestra la columna de acciones. */
   readonly actions = input<readonly DataTableAction[]>([]);
 
+  /** Permite devolver un subconjunto de acciones según la fila. */
+  readonly actionsForRow = input<
+    ((row: DataTableRow) => readonly DataTableAction[]) | null
+  >(null);
+
+  /** Indica qué filas se pueden abrir con clic o con Enter. */
+  readonly rowClickable = input<(row: DataTableRow) => boolean>(() => false);
+
   /** Encabezado de la columna de acciones. */
   readonly actionsLabel = input('Acciones');
 
@@ -83,6 +91,9 @@ export class DataTableComponent {
 
   /** Emite la acción elegida junto con la fila completa. */
   readonly actionSelected = output<DataTableActionEvent>();
+
+  /** Emite la fila abierta cuando la pantalla la marca como navegable. */
+  readonly rowSelected = output<DataTableRow>();
 
   private readonly paginator = viewChild(MatPaginator);
 
@@ -130,6 +141,10 @@ export class DataTableComponent {
 
   /** Tamaños en bytes con unidad legible (B, KB, MB). */
   protected formatSize(value: unknown): string {
+    if (value === null || value === undefined || value === '') {
+      return '—';
+    }
+
     const bytes = Number(value);
     if (!Number.isFinite(bytes) || bytes < 0) {
       return '—';
@@ -154,6 +169,23 @@ export class DataTableComponent {
   /** Notifica al padre qué acción se eligió sobre qué fila. */
   protected emitAction(action: DataTableAction, row: DataTableRow): void {
     this.actionSelected.emit({ action: action.id, row });
+  }
+
+  /** Acciones que corresponden a una fila concreta. */
+  protected rowActions(row: DataTableRow): readonly DataTableAction[] {
+    return this.actionsForRow()?.(row) ?? this.actions();
+  }
+
+  /** Determina si la fila responde a clic o Enter. */
+  protected isRowClickable(row: DataTableRow): boolean {
+    return this.rowClickable()(row);
+  }
+
+  /** Emite la fila solo si la pantalla la marcó como navegable. */
+  protected selectRow(row: DataTableRow): void {
+    if (this.isRowClickable(row)) {
+      this.rowSelected.emit(row);
+    }
   }
 
   private readonly dateFormatter = new Intl.DateTimeFormat('es', {

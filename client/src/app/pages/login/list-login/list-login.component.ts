@@ -1,16 +1,7 @@
-import {
-  ChangeDetectionStrategy,
-  Component,
-  inject,
-  signal,
-} from '@angular/core';
-import {
-  FormBuilder,
-  ReactiveFormsModule,
-  Validators,
-} from '@angular/forms';
+import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
-import { ActivatedRoute, Router } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
 import { MatFormFieldModule } from '@angular/material/form-field';
@@ -30,6 +21,7 @@ import { AuthService } from '../../../core/services/auth.service';
   selector: 'app-list-login',
   imports: [
     ReactiveFormsModule,
+    RouterLink,
     MatCardModule,
     MatFormFieldModule,
     MatInputModule,
@@ -50,6 +42,9 @@ export class ListLoginComponent {
   /** Mensaje de error visible para el usuario. */
   readonly errorMessage = signal<string | null>(null);
 
+  /** Confirmación mostrada al volver desde la pantalla de registro. */
+  readonly successMessage = signal<string | null>(null);
+
   /** Evita dobles envíos mientras la petición está en curso. */
   readonly loading = signal(false);
 
@@ -65,12 +60,24 @@ export class ListLoginComponent {
     // Si ya hay sesión, no tiene sentido mostrar el login.
     if (this.auth.isAuthenticated()) {
       void this.router.navigateByUrl(this.returnUrl());
+      return;
+    }
+
+    // El registro vuelve aquí con `registered=1` y el correo usado.
+    const email = this.route.snapshot.queryParamMap.get('email');
+    if (email) {
+      this.form.controls.email.setValue(email);
+    }
+
+    if (this.route.snapshot.queryParamMap.get('registered') === '1') {
+      this.successMessage.set('Tu cuenta se creó correctamente. Ya puedes iniciar sesión.');
     }
   }
 
   /** Envía las credenciales y gestiona los errores de la API. */
   submit(): void {
     this.errorMessage.set(null);
+    this.successMessage.set(null);
     this.form.markAllAsTouched();
 
     if (this.form.invalid || this.loading()) {

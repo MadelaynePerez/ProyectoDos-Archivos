@@ -43,30 +43,48 @@
 
 .badge-user,
 .badge-comment,
-.badge-file {
+.badge-file,
+.badge-archivo {
   background: var(--mat-sys-primary-container);
   color: var(--mat-sys-on-primary-container);
 }
 
 .badge-edit,
-.badge-folder {
+.badge-folder,
+.badge-carpeta {
   background: var(--mat-sys-tertiary-container);
   color: var(--mat-sys-on-tertiary-container);
 }
 
 .badge-read,
 .badge-true,
-.badge-active {
+.badge-active,
+.badge-activo {
   background: var(--mat-sys-secondary-container);
   color: var(--mat-sys-on-secondary-container);
 }
 
 .badge-false,
-.badge-inactive {
+.badge-inactive,
+.badge-inactivo {
   background: var(--mat-sys-surface-container-highest);
   color: var(--mat-sys-on-surface-variant);
 }
 
 .danger {
   color: var(--mat-sys-error);
+}
+
+/* Solo las filas navegables muestran cursor y foco de teclado. */
+tr.clickable {
+  cursor: pointer;
+}
+
+tr.clickable:hover {
+  background: var(--mat-sys-surface-container-low);
+}
+
+tr.clickable:focus-visible {
+  outline: 2px solid var(--mat-sys-primary);
+  outline-offset: -2px;
 }

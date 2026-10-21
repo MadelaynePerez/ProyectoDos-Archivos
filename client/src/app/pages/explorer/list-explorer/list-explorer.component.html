@@ -1,0 +1,151 @@
+<section class="explorer-page">
+  <header class="page-header">
+    <div class="page-heading">
+      <h1>Mis archivos</h1>
+
+      <nav class="breadcrumb" aria-label="Ruta de carpetas">
+        @for (item of breadcrumb(); track $index; let last = $last) {
+          @if (!last) {
+            <button
+              mat-button
+              type="button"
+              class="breadcrumb-link"
+              (click)="goToBreadcrumb($index)"
+            >
+              @if ($index === 0) {
+                <mat-icon>home</mat-icon>
+              }
+              <span>{{ item.name }}</span>
+            </button>
+            <mat-icon class="breadcrumb-separator" aria-hidden="true">
+              chevron_right
+            </mat-icon>
+          } @else {
+            <span class="breadcrumb-current" aria-current="page">
+              @if ($index === 0) {
+                <mat-icon>home</mat-icon>
+              }
+              <span>{{ item.name }}</span>
+            </span>
+          }
+        }
+      </nav>
+    </div>
+
+    <div class="page-actions">
+      <button mat-stroked-button type="button" (click)="createFolder()">
+        <mat-icon>create_new_folder</mat-icon>
+        Nueva carpeta
+      </button>
+
+      <button
+        mat-flat-button
+        type="button"
+        [disabled]="uploading()"
+        (click)="fileInput.click()"
+      >
+        <mat-icon>upload_file</mat-icon>
+        {{ uploading() ? 'Subiendo…' : 'Subir archivo' }}
+      </button>
+
+      <input
+        #fileInput
+        class="file-input"
+        type="file"
+        accept=".txt,.md,text/plain,text/markdown"
+        (change)="onFileSelected($event)"
+      />
+    </div>
+  </header>
+
+  <mat-card appearance="outlined" class="filters-card">
+    <div class="filters-row">
+      <mat-form-field
+        appearance="outline"
+        class="search-field"
+        subscriptSizing="dynamic"
+      >
+        <mat-label>Buscar por nombre</mat-label>
+        <mat-icon matPrefix>search</mat-icon>
+        <input
+          matInput
+          [value]="searchTerm()"
+          placeholder="Ej. informe"
+          (input)="onSearchInput($event)"
+        />
+        @if (searchTerm()) {
+          <button
+            mat-icon-button
+            matSuffix
+            type="button"
+            aria-label="Limpiar búsqueda"
+            (click)="clearSearch()"
+          >
+            <mat-icon>close</mat-icon>
+          </button>
+        }
+      </mat-form-field>
+
+      <mat-form-field
+        appearance="outline"
+        class="filter-field"
+        subscriptSizing="dynamic"
+      >
+        <mat-label>Extensión</mat-label>
+        <mat-select
+          [value]="extension()"
+          (selectionChange)="setExtension($event.value)"
+        >
+          <mat-option value="">Todas</mat-option>
+          <mat-option value="txt">.txt</mat-option>
+          <mat-option value="md">.md</mat-option>
+        </mat-select>
+      </mat-form-field>
+
+      <mat-form-field
+        appearance="outline"
+        class="filter-field"
+        subscriptSizing="dynamic"
+      >
+        <mat-label>Ordenar por</mat-label>
+        <mat-select
+          [value]="sortBy()"
+          (selectionChange)="setSortBy($event.value)"
+        >
+          <mat-option value="name">Nombre</mat-option>
+          <mat-option value="date">Fecha</mat-option>
+          <mat-option value="size">Tamaño</mat-option>
+        </mat-select>
+      </mat-form-field>
+
+      <button
+        mat-stroked-button
+        type="button"
+        class="sort-order-button"
+        (click)="toggleSortOrder()"
+      >
+        <mat-icon>
+          {{ sortOrder() === 'asc' ? 'arrow_upward' : 'arrow_downward' }}
+        </mat-icon>
+        {{ sortOrder() === 'asc' ? 'Ascendente' : 'Descendente' }}
+      </button>
+    </div>
+  </mat-card>
+
+  @if (loading()) {
+    <mat-progress-bar mode="indeterminate" aria-label="Cargando contenido" />
+  }
+
+  <mat-card appearance="outlined" class="table-card">
+    <app-data-table
+      [columns]="columns"
+      [rows]="rows()"
+      [actions]="actions"
+      [actionsForRow]="actionsForRow"
+      [rowClickable]="isFolderRow"
+      [emptyMessage]="emptyMessage()"
+      (rowSelected)="onRowSelected($event)"
+      (actionSelected)="onAction($event)"
+    />
+  </mat-card>
+</section>

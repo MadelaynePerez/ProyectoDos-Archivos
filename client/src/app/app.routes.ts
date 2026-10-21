@@ -6,7 +6,7 @@ import { authGuard } from './core/guards/auth.guard';
 /**
  * Rutas de la aplicación con lazy loading.
  *
- * - `/login` es pública.
+ * - `/login` y `/register` son públicas.
  * - El layout privado se carga de forma diferida y protege a sus hijas con
  *   `authGuard`.
  * - `/users` agrega `adminGuard`: solo el rol ADMIN puede abrir el panel.
@@ -16,50 +16,49 @@ export const routes: Routes = [
     path: 'login',
     title: 'Iniciar sesión · Gestión Documental',
     loadComponent: () =>
-      import('./pages/login/list-login/list-login.component').then(
-        (m) => m.ListLoginComponent,
-      ),
+      import('./pages/login/list-login/list-login.component').then((m) => m.ListLoginComponent),
+  },
+  {
+    path: 'register',
+    title: 'Crear cuenta · Gestión Documental',
+    loadComponent: () =>
+      import('./pages/login/register/register.component').then((m) => m.RegisterComponent),
   },
   {
     path: '',
     canActivate: [authGuard],
-    loadComponent: () =>
-      import('./shared/layout/layout.component').then(
-        (m) => m.LayoutComponent,
-      ),
+    loadComponent: () => import('./shared/layout/layout.component').then((m) => m.LayoutComponent),
     children: [
       { path: '', pathMatch: 'full', redirectTo: 'files' },
       {
         path: 'files',
         title: 'Mis archivos · Gestión Documental',
         loadComponent: () =>
-          import('./pages/files/list-files/list-files.component').then(
-            (m) => m.ListFilesComponent,
+          import('./pages/explorer/list-explorer/list-explorer.component').then(
+            (m) => m.ListExplorerComponent,
           ),
       },
       {
         path: 'shared-with-me',
         title: 'Compartido conmigo · Gestión Documental',
         loadComponent: () =>
-          import(
-            './pages/shared-with-me/list-shared-with-me/list-shared-with-me.component'
-          ).then((m) => m.ListSharedWithMeComponent),
+          import('./pages/shared-with-me/list-shared-with-me/list-shared-with-me.component').then(
+            (m) => m.ListSharedWithMeComponent,
+          ),
       },
       {
         path: 'shared-by-me',
         title: 'Compartido por mí · Gestión Documental',
         loadComponent: () =>
-          import(
-            './pages/shared-by-me/list-shared-by-me/list-shared-by-me.component'
-          ).then((m) => m.ListSharedByMeComponent),
+          import('./pages/shared-by-me/list-shared-by-me/list-shared-by-me.component').then(
+            (m) => m.ListSharedByMeComponent,
+          ),
       },
       {
         path: 'trash',
         title: 'Papelera · Gestión Documental',
         loadComponent: () =>
-          import('./pages/trash/list-trash/list-trash.component').then(
-            (m) => m.ListTrashComponent,
-          ),
+          import('./pages/trash/list-trash/list-trash.component').then((m) => m.ListTrashComponent),
       },
       {
         path: 'activity',
@@ -82,9 +81,7 @@ export const routes: Routes = [
         title: 'Usuarios · Gestión Documental',
         canActivate: [adminGuard],
         loadComponent: () =>
-          import('./pages/users/list-users/list-users.component').then(
-            (m) => m.ListUsersComponent,
-          ),
+          import('./pages/users/list-users/list-users.component').then((m) => m.ListUsersComponent),
       },
     ],
   },

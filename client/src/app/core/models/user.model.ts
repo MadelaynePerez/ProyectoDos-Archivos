@@ -13,3 +13,12 @@ export interface User {
   createdAt: string;
   updatedAt: string;
 }
+
+/**
+ * Cambios permitidos por `PATCH /api/users/:id`.
+ * La API no admite modificar email, contraseña ni storageUsed por esta vía.
+ */
+export interface UpdateUserRequest {
+  role?: UserRole;
+  isActive?: boolean;
+}

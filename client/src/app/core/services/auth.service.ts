@@ -4,7 +4,7 @@ import { Router } from '@angular/router';
 import { map, Observable, tap } from 'rxjs';
 
 import { apiUrl } from '../api/api';
-import type { AuthResponse, LoginRequest } from '../models/auth.model';
+import type { AuthResponse, LoginRequest, RegisterRequest } from '../models/auth.model';
 import type { User } from '../models/user.model';
 
 /** Claves usadas en localStorage para persistir la sesión. */
@@ -30,9 +30,7 @@ export class AuthService {
   readonly currentUser = this.userSignal.asReadonly();
 
   /** Hay sesión válida cuando existen usuario y token guardados. */
-  readonly isAuthenticated = computed(
-    () => this.userSignal() !== null && this.getToken() !== null,
-  );
+  readonly isAuthenticated = computed(() => this.userSignal() !== null && this.getToken() !== null);
 
   /** Solo el rol ADMIN puede entrar al panel de usuarios. */
   readonly isAdmin = computed(() => this.userSignal()?.role === 'ADMIN');
@@ -42,12 +40,27 @@ export class AuthService {
    * Devuelve el usuario para que el componente pueda navegar al terminar.
    */
   login(credentials: LoginRequest): Observable<User> {
-    return this.http
-      .post<AuthResponse>(apiUrl('/auth/login'), credentials)
-      .pipe(
-        tap((response) => this.storeSession(response)),
-        map((response) => response.user),
-      );
+    return this.http.post<AuthResponse>(apiUrl('/auth/login'), credentials).pipe(
+      tap((response) => this.storeSession(response)),
+      map((response) => response.user),
+    );
+  }
+
+  /**
+   * Crea una cuenta pública con `POST /api/auth/register`.
+   * El registro no devuelve token: después hay que iniciar sesión.
+   */
+  register(data: RegisterRequest): Observable<User> {
+    return this.http.post<User>(apiUrl('/auth/register'), data);
+  }
+
+  /**
+   * Actualiza el usuario persistido cuando el backend devuelve datos nuevos
+   * (por ejemplo, si un ADMIN cambia su propio rol desde el panel).
+   */
+  updateCurrentUser(user: User): void {
+    localStorage.setItem(USER_KEY, JSON.stringify(user));
+    this.userSignal.set(user);
   }
 
   /**

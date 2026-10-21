@@ -1,0 +1,34 @@
+<h2 mat-dialog-title>Mover {{ data.itemType === 'folder' ? 'carpeta' : 'archivo' }}</h2>
+
+<mat-dialog-content>
+  <p class="dialog-message">
+    Elige la carpeta destino para <strong>{{ data.itemName }}</strong>.
+  </p>
+
+  @if (destinations().length > 0) {
+    <mat-form-field appearance="outline" class="full-width">
+      <mat-label>Carpeta destino</mat-label>
+      <mat-select [formControl]="destination">
+        @for (option of destinations(); track option.id) {
+          <mat-option [value]="option.id">{{ option.label }}</mat-option>
+        }
+      </mat-select>
+    </mat-form-field>
+  } @else {
+    <p class="empty-message">
+      No hay otras carpetas disponibles para mover este elemento.
+    </p>
+  }
+</mat-dialog-content>
+
+<mat-dialog-actions align="end">
+  <button mat-button type="button" (click)="cancel()">Cancelar</button>
+  <button
+    mat-flat-button
+    type="button"
+    [disabled]="destinations().length === 0 || destination.invalid"
+    (click)="confirm()"
+  >
+    Mover
+  </button>
+</mat-dialog-actions>

@@ -1,5 +1,60 @@
-<app-section-placeholder
-  title="Compartido conmigo"
-  description="Aquí verás los archivos y carpetas que otros usuarios han compartido contigo."
-  icon="call_received"
-/>
+<section class="shared-page">
+  <header class="page-header">
+    <div class="page-heading">
+      <h1>Compartido conmigo</h1>
+
+      @if (currentFolderId()) {
+        <nav class="breadcrumb" aria-label="Ruta de la carpeta compartida">
+          <button mat-button type="button" class="breadcrumb-link" (click)="goToRoot()">
+            <mat-icon>folder_shared</mat-icon>
+            <span>Compartido conmigo</span>
+          </button>
+
+          @for (item of breadcrumb(); track item.id; let last = $last) {
+            <mat-icon class="breadcrumb-separator" aria-hidden="true"> chevron_right </mat-icon>
+            @if (!last) {
+              <button
+                mat-button
+                type="button"
+                class="breadcrumb-link"
+                (click)="goToBreadcrumb($index)"
+              >
+                <span>{{ item.name }}</span>
+              </button>
+            } @else {
+              <span class="breadcrumb-current" aria-current="page">
+                {{ item.name }}
+              </span>
+            }
+          }
+        </nav>
+
+        <p class="page-subtitle">
+          Permiso actual: <strong>{{ currentAccess() }}</strong>
+        </p>
+      } @else {
+        <p class="page-subtitle">
+          Archivos y carpetas que otros usuarios compartieron contigo. Puedes abrir carpetas y
+          descargar archivos; renombrar requiere EDIT.
+        </p>
+      }
+    </div>
+  </header>
+
+  @if (loading()) {
+    <mat-progress-bar mode="indeterminate" aria-label="Cargando recursos" />
+  }
+
+  <mat-card appearance="outlined" class="table-card">
+    <app-data-table
+      [columns]="columns"
+      [rows]="rows()"
+      [actions]="actions"
+      [actionsForRow]="actionsForRow"
+      [rowClickable]="isFolderRow"
+      [emptyMessage]="emptyMessage()"
+      (rowSelected)="onRowSelected($event)"
+      (actionSelected)="onAction($event)"
+    />
+  </mat-card>
+</section>

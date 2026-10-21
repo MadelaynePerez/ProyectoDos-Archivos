@@ -1,5 +1,28 @@
-<app-section-placeholder
-  title="Usuarios"
-  description="Aquí el administrador podrá activar o desactivar cuentas y cambiar el rol de los usuarios."
-  icon="group"
-/>
+<section class="users-page">
+  <header class="page-header">
+    <div class="page-heading">
+      <h1>Usuarios</h1>
+      <p class="page-subtitle">{{ subtitle() }}</p>
+    </div>
+
+    <button mat-stroked-button type="button" [disabled]="loading() || busy()" (click)="reload()">
+      <mat-icon>refresh</mat-icon>
+      Actualizar
+    </button>
+  </header>
+
+  @if (loading() || busy()) {
+    <mat-progress-bar mode="indeterminate" aria-label="Cargando o actualizando usuarios" />
+  }
+
+  <mat-card appearance="outlined" class="table-card">
+    <app-data-table
+      [columns]="columns"
+      [rows]="rows()"
+      [actions]="actions"
+      [actionsForRow]="actionsForRow"
+      [emptyMessage]="emptyMessage"
+      (actionSelected)="onAction($event)"
+    />
+  </mat-card>
+</section>

@@ -1,0 +1,23 @@
+<h2 mat-dialog-title>Cambiar permiso</h2>
+
+<mat-dialog-content>
+  <p class="dialog-message">
+    Ajusta el acceso de <strong>{{ data.granteeName }}</strong> a
+    <strong>{{ data.resourceName }}</strong
+    >. Nivel actual: {{ currentLabel() }}.
+  </p>
+
+  <mat-form-field appearance="outline" class="full-width">
+    <mat-label>Nivel de acceso</mat-label>
+    <mat-select [formControl]="access">
+      @for (option of options; track option.value) {
+        <mat-option [value]="option.value">{{ option.label }}</mat-option>
+      }
+    </mat-select>
+  </mat-form-field>
+</mat-dialog-content>
+
+<mat-dialog-actions align="end">
+  <button mat-button type="button" (click)="cancel()">Cancelar</button>
+  <button mat-flat-button type="button" (click)="confirm()">Guardar</button>
+</mat-dialog-actions>
