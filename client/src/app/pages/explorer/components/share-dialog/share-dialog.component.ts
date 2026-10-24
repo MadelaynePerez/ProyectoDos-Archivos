@@ -101,7 +101,9 @@ export class ShareDialogComponent {
   }
 
   /** Concede el permiso indicado o actualiza el existente. */
-  protected grant(): void {
+  protected grant(event: Event): void {
+    // Evita que el navegador recargue la página al enviar el formulario.
+    event.preventDefault();
     this.email.markAsTouched();
     if (this.email.invalid || this.saving()) {
       return;

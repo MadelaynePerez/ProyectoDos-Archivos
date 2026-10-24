@@ -59,7 +59,9 @@ export class PromptDialogComponent {
   });
 
   /** Cierra con el texto limpio; si queda vacío y es obligatorio, no envía. */
-  protected submit(): void {
+  protected submit(event: Event): void {
+    // Evita que el navegador recargue la página al enviar el formulario.
+    event.preventDefault();
     this.control.markAsTouched();
     if (this.control.invalid) {
       return;

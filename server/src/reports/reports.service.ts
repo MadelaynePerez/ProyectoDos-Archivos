@@ -144,6 +144,26 @@ export interface TopActionRow {
   count: number;
 }
 
+/** Fila del reporte 13: archivo vivo sin ningún permiso efectivo. */
+export interface FileNeverSharedRow {
+  _id: Types.ObjectId;
+  name: string;
+  extension: string;
+  size: number;
+  ownerId: Types.ObjectId;
+  ownerName: string;
+  createdAt: Date;
+}
+
+/** Fila del reporte 14: carpeta viva y cantidad de archivos directos. */
+export interface FolderMostFilesRow {
+  folderId: Types.ObjectId;
+  name: string;
+  ownerId: Types.ObjectId;
+  ownerName: string;
+  files: number;
+}
+
 /**
  * Reportes analíticos bajo `/api/reports`.
  *
@@ -617,6 +637,202 @@ export class ReportsService {
     ];
 
     return this.activityModel.aggregate<TopActionRow>(pipeline).exec();
+  }
+
+  /**
+   * Reporte 13 — archivos vivos sin ningún permiso: ni un share directo del
+   * archivo (`resourceType: FILE`) ni un share heredado de su carpeta o de
+   * `folder.ancestors` (`resourceType: FOLDER`).
+   *
+   * La herencia replica la regla de `AccessService`: un permiso sobre una
+   * carpeta alcanza a todo su contenido actual y futuro, sin copiar documentos
+   * a cada archivo. Por eso el reporte debe mirar la cadena completa de
+   * ancestros de la carpeta contenedora, no solo el share directo.
+   *
+   * `$lookup` trae únicamente los ancestros de la carpeta viva del archivo y
+   * un segundo `$lookup` con `$expr` comprueba en una sola consulta si existe
+   * algún permiso directo o heredado. Un archivo suelto (`folderId: null`) no
+   * puede heredar permisos.
+   */
+  async filesNeverShared(
+    requester: AuthenticatedUser,
+  ): Promise<FileNeverSharedRow[]> {
+    const pipeline: PipelineStage[] = [
+      {
+        $match: {
+          isDeleted: false,
+          ...this.fileOwnerScope(requester),
+        },
+      },
+      {
+        $lookup: {
+          from: 'folders',
+          localField: 'folderId',
+          foreignField: '_id',
+          as: 'folder',
+          pipeline: [
+            { $match: { isDeleted: false } },
+            { $project: { ancestors: 1 } },
+          ],
+        },
+      },
+      // `preserveNullAndEmptyArrays` mantiene los archivos sin carpeta.
+      { $unwind: { path: '$folder', preserveNullAndEmptyArrays: true } },
+      {
+        $set: {
+          /*
+           * Ids que pueden otorgar acceso heredado: la carpeta contenedora y
+           * todos sus ancestros. Si el archivo está en la raíz o su carpeta no
+           * existe/está en papelera, el array queda vacío.
+           */
+          folderIds: {
+            $cond: [
+              { $eq: [{ $type: '$folder' }, 'object'] },
+              {
+                $concatArrays: [
+                  ['$folderId'],
+                  { $ifNull: ['$folder.ancestors', []] },
+                ],
+              },
+              [],
+            ],
+          },
+        },
+      },
+      {
+        $lookup: {
+          from: 'shares',
+          let: { fileId: '$_id', folderIds: '$folderIds' },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $or: [
+                    {
+                      $and: [
+                        { $eq: ['$resourceType', ShareResourceType.FILE] },
+                        { $eq: ['$resourceId', '$$fileId'] },
+                      ],
+                    },
+                    {
+                      $and: [
+                        { $eq: ['$resourceType', ShareResourceType.FOLDER] },
+                        { $in: ['$resourceId', '$$folderIds'] },
+                      ],
+                    },
+                  ],
+                },
+              },
+            },
+            // Solo interesa saber si hay al menos un permiso.
+            { $limit: 1 },
+            { $project: { _id: 1 } },
+          ],
+          as: 'permissions',
+        },
+      },
+      { $match: { permissions: { $size: 0 } } },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'ownerId',
+          foreignField: '_id',
+          as: 'owner',
+        },
+      },
+      {
+        $unwind: {
+          path: '$owner',
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+      // Mismo desempate que el resto de reportes de archivos.
+      { $sort: { createdAt: -1, _id: -1 } },
+      {
+        $project: {
+          _id: 1,
+          name: 1,
+          extension: 1,
+          size: 1,
+          ownerId: 1,
+          ownerName: { $ifNull: ['$owner.name', 'Usuario eliminado'] },
+          createdAt: 1,
+        },
+      },
+    ];
+
+    return this.fileModel.aggregate<FileNeverSharedRow>(pipeline).exec();
+  }
+
+  /**
+   * Reporte 14 — top 10 de carpetas vivas por cantidad de archivos vivos
+   * directos (los que tienen `folderId` igual al `_id` de la carpeta).
+   *
+   * Se parte de `files` porque el índice `{ folderId, isDeleted, name }`
+   * resuelve el agrupamiento sin recorrer las carpetas sin contenido. El
+   * `$lookup` posterior descarta carpetas en papelera y resuelve su dueño.
+   * No se cuentan archivos de subcarpetas: "directos" excluye descendientes.
+   */
+  async foldersMostFiles(
+    requester: AuthenticatedUser,
+  ): Promise<FolderMostFilesRow[]> {
+    const pipeline: PipelineStage[] = [
+      {
+        $match: {
+          isDeleted: false,
+          folderId: { $ne: null },
+          ...this.fileOwnerScope(requester),
+        },
+      },
+      {
+        $group: {
+          _id: '$folderId',
+          files: { $sum: 1 },
+        },
+      },
+      {
+        $lookup: {
+          from: 'folders',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'folder',
+          pipeline: [
+            { $match: { isDeleted: false } },
+            { $project: { name: 1, ownerId: 1 } },
+          ],
+        },
+      },
+      // Descarta carpetas huérfanas o en papelera.
+      { $unwind: '$folder' },
+      { $sort: { files: -1, 'folder.name': 1, _id: 1 } },
+      { $limit: 10 },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'folder.ownerId',
+          foreignField: '_id',
+          as: 'owner',
+        },
+      },
+      {
+        $unwind: {
+          path: '$owner',
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          folderId: '$_id',
+          name: '$folder.name',
+          ownerId: '$folder.ownerId',
+          ownerName: { $ifNull: ['$owner.name', 'Usuario eliminado'] },
+          files: 1,
+        },
+      },
+    ];
+
+    return this.fileModel.aggregate<FolderMostFilesRow>(pipeline).exec();
   }
 
   /**

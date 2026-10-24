@@ -8,6 +8,13 @@ export enum UserRole {
 }
 
 /**
+ * Cuota de almacenamiento por defecto: 50 MB.
+ * Los usuarios creados antes de existir `storageQuota` se interpretan con este
+ * valor, tanto al hidratarlos con Mongoose como en las validaciones de subida.
+ */
+export const DEFAULT_STORAGE_QUOTA = 50 * 1024 * 1024;
+
+/**
  * Colección `users`.
  *
  * Responsabilidad: identidad, credenciales, rol, estado y contabilidad de
@@ -62,6 +69,15 @@ export class User {
    */
   @Prop({ required: true, default: 0, min: 0 })
   storageUsed: number;
+
+  /**
+   * Cuota máxima de almacenamiento en bytes. Por defecto 50 MB.
+   *
+   * Invariante (se mantiene en la capa de servicio): debe ser un entero
+   * positivo y nunca menor que `storageUsed`.
+   */
+  @Prop({ required: true, default: DEFAULT_STORAGE_QUOTA, min: 1 })
+  storageQuota: number;
 
   /** Último login correcto; `null` si nunca ha iniciado sesión. */
   @Prop({ type: Date, default: null })

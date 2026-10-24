@@ -30,6 +30,31 @@
         </a>
       }
     </mat-nav-list>
+
+    <!-- Resumen de cuota compartido: se refresca tras las operaciones que
+         modifican el espacio ocupado (subir, crear, editar, purgar). -->
+    <div class="storage-panel">
+      <div class="storage-title">
+        <mat-icon>cloud_queue</mat-icon>
+        <span>Almacenamiento</span>
+      </div>
+
+      @if (storage.usage()) {
+        <mat-progress-bar
+          mode="determinate"
+          [value]="storagePercent()"
+          [color]="storageColor()"
+          [attr.aria-label]="
+            'Almacenamiento usado: ' + storageUsedLabel() + ' de ' + storageQuotaLabel()
+          "
+        />
+        <p class="storage-used">{{ storageUsedLabel() }} de {{ storageQuotaLabel() }} usados</p>
+        <p class="storage-available">{{ storageAvailableLabel() }} disponibles</p>
+      } @else {
+        <mat-progress-bar mode="indeterminate" aria-label="Cargando almacenamiento" />
+        <p class="storage-available">Consultando almacenamiento…</p>
+      }
+    </div>
   </mat-sidenav>
 
   <mat-sidenav-content class="app-content">

@@ -64,6 +64,18 @@ export class FilesService {
   }
 
   /**
+   * Reemplaza el contenido de un archivo existente con `PUT /api/files/:id/content`.
+   *
+   * El archivo debe conservar la extensión actual. Igual que en la subida, no
+   * se fija `Content-Type`: el navegador agrega el boundary del multipart.
+   */
+  updateContent(fileId: string, file: File): Observable<FileItem> {
+    const formData = new FormData();
+    formData.append('file', file, file.name);
+    return this.http.put<FileItem>(apiUrl(`/files/${fileId}/content`), formData);
+  }
+
+  /**
    * Descarga el contenido como blob.
    *
    * `responseType: 'blob'` evita que Angular intente interpretar el texto y el

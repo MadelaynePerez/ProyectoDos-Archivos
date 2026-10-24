@@ -1,5 +1,40 @@
-<app-section-placeholder
-  title="Actividad"
-  description="Aquí consultarás el historial de acciones realizadas sobre tus archivos y carpetas."
-  icon="history"
-/>
+<section class="activity-page">
+  <header class="page-header">
+    <div class="page-heading">
+      <h1>Historial de actividad</h1>
+      <p class="page-subtitle">{{ subtitle() }}</p>
+    </div>
+
+    <button mat-stroked-button type="button" [disabled]="loading()" (click)="reload()">
+      <mat-icon>refresh</mat-icon>
+      Actualizar
+    </button>
+  </header>
+
+  <mat-card appearance="outlined" class="filters-card">
+    <app-filters
+      [showSearch]="false"
+      [showUser]="false"
+      [showDateRange]="true"
+      (filtersChange)="onFiltersChange($event)"
+    />
+  </mat-card>
+
+  @if (loading()) {
+    <mat-progress-bar mode="indeterminate" aria-label="Cargando historial de actividad" />
+  }
+
+  <mat-card appearance="outlined" class="table-card">
+    <app-data-table
+      [columns]="columns"
+      [rows]="rows()"
+      [serverSide]="true"
+      [total]="total()"
+      [pageIndex]="pageIndex()"
+      [pageSize]="pageSize()"
+      [pageSizeOptions]="pageSizeOptions"
+      [emptyMessage]="emptyMessage()"
+      (pageChange)="onPageChange($event)"
+    />
+  </mat-card>
+</section>

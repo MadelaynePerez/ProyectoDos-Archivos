@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -8,7 +9,19 @@ import { compare, hash } from 'bcryptjs';
 import { Model, Types } from 'mongoose';
 
 import { UpdateUserDto } from './dto/update-user.dto.js';
-import { User, type UserDocument, UserRole } from './schemas/user.schema.js';
+import {
+  DEFAULT_STORAGE_QUOTA,
+  User,
+  type UserDocument,
+  UserRole,
+} from './schemas/user.schema.js';
+
+/** Resumen de cuota de almacenamiento de un usuario. */
+export interface StorageSummary {
+  quota: number;
+  used: number;
+  available: number;
+}
 
 /** Datos mínimos para crear un usuario. El rol nunca viene del cliente. */
 export interface CreateUserData {
@@ -76,6 +89,27 @@ export class UsersService {
     return this.userModel.findById(id).exec();
   }
 
+  /**
+   * Resumen de almacenamiento del usuario autenticado.
+   * `available` nunca es negativo: si la cuota se redujo por debajo de lo ya
+   * usado (situación transitoria), el cliente ve 0 bytes disponibles.
+   */
+  async getStorage(userId: string): Promise<StorageSummary> {
+    const user = await this.findById(userId);
+    if (!user) {
+      throw new NotFoundException('Usuario no encontrado');
+    }
+
+    const quota = user.storageQuota ?? DEFAULT_STORAGE_QUOTA;
+    const used = user.storageUsed ?? 0;
+
+    return {
+      quota,
+      used,
+      available: Math.max(quota - used, 0),
+    };
+  }
+
   /** Listado administrativo de usuarios. */
   async findAll(): Promise<Record<string, unknown>[]> {
     const users = await this.userModel.find().sort({ createdAt: -1 }).exec();
@@ -83,7 +117,7 @@ export class UsersService {
   }
 
   /**
-   * Actualiza rol y/o estado. Solo se invoca desde rutas protegidas de ADMIN.
+   * Actualiza rol, estado y/o cuota. Solo se invoca desde rutas de ADMIN.
    * Desactivar no borra al usuario ni su historial: solo impide el login.
    */
   async update(
@@ -105,6 +139,16 @@ export class UsersService {
     if (dto.isActive !== undefined) {
       user.isActive = dto.isActive;
     }
+    if (dto.storageQuota !== undefined) {
+      // La cuota no puede dejar al usuario por debajo de lo que ya ocupa.
+      // El DTO ya garantiza que sea un entero positivo.
+      if (dto.storageQuota < (user.storageUsed ?? 0)) {
+        throw new BadRequestException(
+          `La cuota no puede ser menor que el espacio ya usado (${user.storageUsed ?? 0} bytes)`,
+        );
+      }
+      user.storageQuota = dto.storageQuota;
+    }
 
     await user.save();
     return this.toPublic(user);
@@ -123,6 +167,14 @@ export class UsersService {
   toPublic(user: UserDocument): Record<string, unknown> {
     const plain = user.toObject() as unknown as Record<string, unknown>;
     delete plain.passwordHash;
+
+    // Compatibilidad con usuarios creados antes de existir `storageQuota`:
+    // aunque Mongoose aplica el default al hidratar, la respuesta pública
+    // siempre expone un valor concreto.
+    if (plain.storageQuota === undefined || plain.storageQuota === null) {
+      plain.storageQuota = DEFAULT_STORAGE_QUOTA;
+    }
+
     return plain;
   }
 

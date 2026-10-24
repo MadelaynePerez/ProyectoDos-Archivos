@@ -19,7 +19,7 @@ type AuthenticatedRequest = Request & { user: AuthenticatedUser };
 export class ActivityController {
   constructor(private readonly activityService: ActivityService) {}
 
-  /**
+  /** 
    * GET /api/activity — historial del usuario autenticado.
    * Filtros opcionales `from`/`to` (ISO 8601) y paginación `page`/`limit`.
    */

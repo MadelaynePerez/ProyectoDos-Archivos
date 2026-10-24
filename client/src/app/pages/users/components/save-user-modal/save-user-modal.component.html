@@ -1,4 +1,4 @@
-<h2 mat-dialog-title>Cambiar rol</h2>
+<h2 mat-dialog-title>Editar usuario</h2>
 
 <mat-dialog-content>
   <p class="dialog-message">
@@ -16,10 +16,26 @@
     <mat-hint>{{ selectedDescription() }}</mat-hint>
   </mat-form-field>
 
+  <mat-form-field appearance="outline" class="full-width">
+    <mat-label>Cuota de almacenamiento (MB)</mat-label>
+    <input matInput type="number" min="0.01" step="0.1" [formControl]="quotaMb" />
+    <mat-hint>
+      Espacio usado actualmente: {{ usedMb() }} MB. La cuota no puede ser menor.
+    </mat-hint>
+    @if (quotaMb.hasError('required')) {
+      <mat-error>Indica la cuota de almacenamiento en MB.</mat-error>
+    } @else if (quotaMb.hasError('quotaInvalid')) {
+      <mat-error>La cuota debe ser un número mayor que 0 MB.</mat-error>
+    } @else if (quotaMb.hasError('quotaTooLow')) {
+      <mat-error> La cuota no puede ser menor que el espacio usado ({{ usedMb() }} MB). </mat-error>
+    }
+  </mat-form-field>
+
   <p class="role-warning">
     <mat-icon>info</mat-icon>
     <span>
-      Los cambios de rol se aplican de inmediato: el backend vuelve a leer el rol en cada petición.
+      Los cambios se aplican de inmediato. Bajar la cuota solo impide nuevas subidas o reemplazos
+      que no quepan; nunca deja la cuenta por debajo de lo que ya tiene ocupado.
     </span>
   </p>
 </mat-dialog-content>
@@ -29,9 +45,9 @@
   <button
     mat-flat-button
     type="button"
-    [disabled]="role.value === data.user.role"
+    [disabled]="!hasChanges() || role.invalid || quotaMb.invalid"
     (click)="confirm()"
   >
-    Guardar rol
+    Guardar cambios
   </button>
 </mat-dialog-actions>

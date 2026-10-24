@@ -52,6 +52,7 @@ interface UserDoc {
   role: UserRole;
   isActive: boolean;
   storageUsed: number;
+  storageQuota: number;
   lastLoginAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -295,6 +296,7 @@ async function insertUsers(db: mongo.Db): Promise<Map<SeedUserKey, UserRecord>> 
       role: spec.role,
       isActive: spec.isActive,
       storageUsed: 0,
+      storageQuota: spec.storageQuota,
       lastLoginAt:
         spec.lastLoginDaysAgo === null ? null : daysAgo(spec.lastLoginDaysAgo, 9, 15),
       createdAt,
@@ -1283,6 +1285,26 @@ async function validateSeed(
       : storageErrors.join('; '),
   );
 
+  const quotaErrors = [...users.values()].filter(
+    (user) =>
+      !Number.isInteger(user.doc.storageQuota) ||
+      user.doc.storageQuota < 1 ||
+      user.doc.storageQuota < user.doc.storageUsed,
+  );
+
+  addCheck(
+    'Cuotas: enteros positivos y no menores que el espacio usado',
+    quotaErrors.length === 0,
+    quotaErrors.length === 0
+      ? [...users.values()]
+          .map(
+            (user) =>
+              `${user.doc.name} ${formatBytes(user.doc.storageUsed)} / ${formatBytes(user.doc.storageQuota)}`,
+          )
+          .join(', ')
+      : quotaErrors.map((user) => user.doc.name).join(', '),
+  );
+
   // --- Jerarquía de carpetas ---------------------------------------------
   const foldersCollection = db.collection('folders');
   const folderTotal = await foldersCollection.countDocuments();
@@ -1677,7 +1699,7 @@ function printReport(
   console.log('Almacenamiento por usuario:');
   for (const user of users.values()) {
     console.log(
-      `  ${user.doc.name.padEnd(18)} ${user.doc.email.padEnd(28)} ${formatBytes(user.doc.storageUsed)}`,
+      `  ${user.doc.name.padEnd(18)} ${user.doc.email.padEnd(28)} ${formatBytes(user.doc.storageUsed)} / ${formatBytes(user.doc.storageQuota)}`,
     );
   }
   console.log('\nCredenciales de prueba (también en docs/api.md):');

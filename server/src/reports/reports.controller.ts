@@ -9,10 +9,12 @@ import { UserActivityQueryDto } from './dto/user-activity-query.dto.js';
 import { UserScopeQueryDto } from './dto/user-scope-query.dto.js';
 import {
   ReportsService,
+  type FileNeverSharedRow,
   type FileOperationsRow,
   type FileRangeRow,
   type FileSharedUsersRow,
   type FilesByTypeRow,
+  type FolderMostFilesRow,
   type OperationsByPeriodRow,
   type OperationsByTypeRow,
   type ShareResourceRow,
@@ -135,5 +137,21 @@ export class ReportsController {
     @Req() request: AuthenticatedRequest,
   ): Promise<TopActionRow[]> {
     return this.reportsService.topActions(request.user);
+  }
+
+  /** GET /api/reports/files-never-shared — archivos sin permisos. */
+  @Get('files-never-shared')
+  filesNeverShared(
+    @Req() request: AuthenticatedRequest,
+  ): Promise<FileNeverSharedRow[]> {
+    return this.reportsService.filesNeverShared(request.user);
+  }
+
+  /** GET /api/reports/folders-most-files — top 10 carpetas con más archivos. */
+  @Get('folders-most-files')
+  foldersMostFiles(
+    @Req() request: AuthenticatedRequest,
+  ): Promise<FolderMostFilesRow[]> {
+    return this.reportsService.foldersMostFiles(request.user);
   }
 }

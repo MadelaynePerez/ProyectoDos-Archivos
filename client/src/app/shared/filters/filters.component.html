@@ -1,0 +1,61 @@
+<form class="filters-form" [formGroup]="form" (ngSubmit)="apply()">
+  @if (showSearch()) {
+    <mat-form-field appearance="outline" class="filter-field search-field">
+      <mat-label>Buscar</mat-label>
+      <mat-icon matPrefix>search</mat-icon>
+      <input matInput type="search" formControlName="search" [placeholder]="searchPlaceholder()" />
+    </mat-form-field>
+  }
+
+  @if (showUser()) {
+    <mat-form-field appearance="outline" class="filter-field">
+      <mat-label>Usuario</mat-label>
+      <mat-select formControlName="userId">
+        <mat-option value="">{{ userEmptyLabel() }}</mat-option>
+        @for (option of userOptions(); track option.value) {
+          <mat-option [value]="option.value">{{ option.label }}</mat-option>
+        }
+      </mat-select>
+    </mat-form-field>
+  }
+
+  @if (showDateRange()) {
+    <mat-form-field appearance="outline" class="filter-field">
+      <mat-label>Desde</mat-label>
+      <input
+        matInput
+        [matDatepicker]="fromPicker"
+        formControlName="from"
+        (dateChange)="clearRangeError()"
+      />
+      <mat-datepicker-toggle matIconSuffix [for]="fromPicker" />
+      <mat-datepicker #fromPicker />
+      @if (form.controls.from.hasError('dateRange')) {
+        <mat-error>La fecha "Desde" no puede ser posterior a "Hasta".</mat-error>
+      }
+    </mat-form-field>
+
+    <mat-form-field appearance="outline" class="filter-field">
+      <mat-label>Hasta</mat-label>
+      <input
+        matInput
+        [matDatepicker]="toPicker"
+        formControlName="to"
+        (dateChange)="clearRangeError()"
+      />
+      <mat-datepicker-toggle matIconSuffix [for]="toPicker" />
+      <mat-datepicker #toPicker />
+    </mat-form-field>
+  }
+
+  <div class="filter-actions">
+    <button mat-button type="button" (click)="clear()">
+      <mat-icon>filter_alt_off</mat-icon>
+      Limpiar
+    </button>
+    <button mat-flat-button type="submit">
+      <mat-icon>filter_alt</mat-icon>
+      Aplicar filtros
+    </button>
+  </div>
+</form>

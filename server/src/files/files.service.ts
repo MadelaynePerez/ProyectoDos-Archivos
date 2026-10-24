@@ -28,7 +28,10 @@ import {
 import { ActivityService } from '../activity/activity.service.js';
 import { Folder, type FolderDocument } from '../folders/schemas/folder.schema.js';
 import { AccessService, EffectiveAccess } from '../shares/access.service.js';
-import { User } from '../users/schemas/user.schema.js';
+import {
+  DEFAULT_STORAGE_QUOTA,
+  User,
+} from '../users/schemas/user.schema.js';
 import {
   MAX_FILE_NAME_LENGTH,
   MAX_FILE_SIZE,
@@ -59,7 +62,13 @@ interface ValidatedUpload {
 
 /** Metadatos que se guardan junto al binario en `fs.files`. */
 interface GridFsMetadata {
-  fileId: Types.ObjectId;
+  /**
+   * Enlace con `files._id`. Es opcional al reemplazar contenido: el índice
+   * único de `fs.files.metadata.fileId` no permite que el binario nuevo y el
+   * anterior coexistan con el mismo valor. Se enlaza cuando el anterior ya se
+   * eliminó.
+   */
+  fileId?: Types.ObjectId;
   ownerId: Types.ObjectId;
   contentType: FileMimeType;
 }
@@ -97,7 +106,7 @@ export class FilesService {
    * Sube un archivo a GridFS y después crea su metadata.
    *
    * Orden seguro sin transacciones:
-   * 1. Validar extensión, MIME y contenido UTF-8.
+   * 1. Validar extensión, MIME, contenido UTF-8 y cuota disponible.
    * 2. Escribir el binario en GridFS.
    * 3. Crear el documento en `files`.
    * 4. Incrementar `users.storageUsed`.
@@ -117,6 +126,10 @@ export class FilesService {
     const folderId = folder?._id ?? null;
 
     await this.ensureNameAvailable(owner, folderId, validated.name);
+
+    // La cuota se comprueba antes de escribir en GridFS: una subida rechazada
+    // no debe dejar chunks ni binarios huérfanos.
+    await this.assertStorageQuota(owner, uploadedFile!.size);
 
     // Se generan los ids antes de escribir para poder compensar cualquier
     // fallo y para enlazar `fs.files.metadata.fileId` con `files._id`.
@@ -430,11 +443,13 @@ export class FilesService {
    * Reemplaza el contenido de un archivo.
    *
    * Orden seguro sin transacciones:
-   * 1. Escribir el nuevo binario en GridFS (el anterior sigue intacto).
-   * 2. Actualizar `gridFsId`, `size`, `contentHash` y `updatedAt` en `files`.
-   * 3. Ajustar `storageUsed` con la diferencia de tamaño.
-   * 4. Borrar el binario anterior.
-   * Si falla 2 o 3 se revierte la metadata y se elimina el binario nuevo.
+   * 1. Validar el nuevo contenido y que la diferencia de tamaño quepa en la
+   *    cuota del dueño.
+   * 2. Escribir el nuevo binario en GridFS (el anterior sigue intacto).
+   * 3. Actualizar `gridFsId`, `size`, `contentHash` y `updatedAt` en `files`.
+   * 4. Ajustar `storageUsed` con la diferencia de tamaño.
+   * 5. Borrar el binario anterior.
+   * Si falla 3 o 4 se revierte la metadata y se elimina el binario nuevo.
    */
   async updateContent(
     userId: string,
@@ -459,11 +474,20 @@ export class FilesService {
       );
     }
 
+    // Al reemplazar solo consume cuota la diferencia positiva entre el tamaño
+    // nuevo y el actual. Se valida antes de escribir el binario nuevo.
+    await this.assertStorageQuota(
+      owner,
+      uploadedFile!.size - file.size,
+    );
+
     const newGridFsId = new Types.ObjectId();
 
     try {
+      // Sin `fileId`: durante el reemplazo conviven temporalmente el binario
+      // anterior y el nuevo, y el índice único de `metadata.fileId` lo impide.
+      // El enlace se completa después de purgar el binario anterior.
       await this.writeGridFs(newGridFsId, file.name, uploadedFile!.buffer, {
-        fileId: file._id,
         ownerId: owner,
         contentType: file.mimeType,
       });
@@ -515,14 +539,23 @@ export class FilesService {
     // Solo después de que la metadata ya apunta al binario nuevo se elimina el
     // anterior. Si esta limpieza falla, queda un huérfano recuperable por
     // reconciliación; el archivo sigue siendo correcto.
+    let previousDeleted = false;
     try {
       await this.getBucket().delete(previousGridFsId);
+      previousDeleted = true;
     } catch (error) {
       this.logger.warn(
         `No se pudo borrar el binario anterior ${previousGridFsId}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
+    }
+
+    // El binario nuevo se enlaza con `files._id` solo cuando el anterior ya no
+    // ocupa el valor único. Si la limpieza falló, se deja sin enlace para no
+    // chocar con el índice; la reconciliación puede completarlo después.
+    if (previousDeleted) {
+      await this.linkGridFsToFile(newGridFsId, file._id);
     }
 
     // Auditoría del reemplazo de contenido, con el tamaño nuevo y el delta.
@@ -662,6 +695,45 @@ export class FilesService {
     return finalName;
   }
 
+  /**
+   * Comprueba que el dueño tenga espacio para `additionalBytes` antes de
+   * escribir en GridFS. En una subida es el tamaño completo; al reemplazar
+   * contenido es la diferencia (puede ser negativa y entonces no consume).
+   *
+   * Sin transacciones, esta lectura y el `$inc` posterior no son atómicos: dos
+   * subidas simultáneas podrían superar ligeramente la cuota. Es un compromiso
+   * aceptado por el despliegue standalone; la reconciliación permite auditar
+   * el saldo real.
+   */
+  private async assertStorageQuota(
+    ownerId: Types.ObjectId,
+    additionalBytes: number,
+  ): Promise<void> {
+    if (additionalBytes <= 0) {
+      return;
+    }
+
+    const user = await this.userModel
+      .findById(ownerId)
+      .select('storageUsed storageQuota')
+      .exec();
+
+    if (!user) {
+      throw new NotFoundException('Usuario no encontrado');
+    }
+
+    const used = user.storageUsed ?? 0;
+    const quota = user.storageQuota ?? DEFAULT_STORAGE_QUOTA;
+
+    if (used + additionalBytes > quota) {
+      const available = Math.max(quota - used, 0);
+      throw new PayloadTooLargeException(
+        `No hay espacio suficiente en la cuota de almacenamiento ` +
+          `(usado: ${used} bytes, cuota: ${quota} bytes, disponible: ${available} bytes)`,
+      );
+    }
+  }
+
   private async findOwnedActiveFolder(
     folderId: string,
     ownerId: Types.ObjectId,
@@ -754,6 +826,35 @@ export class FilesService {
       uploadStream.once('error', reject);
       uploadStream.end(buffer);
     });
+  }
+
+  /**
+   * Completa el enlace `fs.files.metadata.fileId` de un binario reemplazado.
+   * Es best-effort: el contenido ya es correcto y el índice único se respeta
+   * porque el binario anterior ya fue eliminado.
+   */
+  private async linkGridFsToFile(
+    gridFsId: Types.ObjectId,
+    fileId: Types.ObjectId,
+  ): Promise<void> {
+    try {
+      const db = this.connection.db;
+      if (!db) {
+        return;
+      }
+      await db
+        .collection('fs.files')
+        .updateOne(
+          { _id: gridFsId },
+          { $set: { 'metadata.fileId': fileId } },
+        );
+    } catch (error) {
+      this.logger.warn(
+        `No se pudo enlazar el binario ${gridFsId} con el archivo ${fileId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 
   /**

@@ -77,8 +77,11 @@
   }
 
   <mat-paginator
+    [length]="serverSide() ? (total() ?? 0) : rows().length"
     [pageSize]="pageSize()"
+    [pageIndex]="pageIndex()"
     [pageSizeOptions]="pageSizeOptions()"
     [showFirstLastButtons]="true"
+    (page)="onPageChange($event)"
   />
 </div>

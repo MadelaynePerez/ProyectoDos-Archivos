@@ -1,5 +1,8 @@
 import type { ShareAccess } from '../shares/schemas/share.schema.js';
-import type { UserRole } from '../users/schemas/user.schema.js';
+import {
+  DEFAULT_STORAGE_QUOTA,
+  type UserRole,
+} from '../users/schemas/user.schema.js';
 
 /**
  * Datos declarativos del seed.
@@ -20,6 +23,8 @@ export interface SeedUser {
   name: string;
   role: UserRole;
   isActive: boolean;
+  /** Cuota de almacenamiento en bytes; el seed usa 50 MB por defecto. */
+  storageQuota: number;
   createdDaysAgo: number;
   lastLoginDaysAgo: number | null;
 }
@@ -96,6 +101,7 @@ export const SEED_USERS: SeedUser[] = [
     name: 'María Fernández',
     role: 'ADMIN' as UserRole,
     isActive: true,
+    storageQuota: DEFAULT_STORAGE_QUOTA,
     createdDaysAgo: 70,
     lastLoginDaysAgo: 2,
   },
@@ -106,6 +112,7 @@ export const SEED_USERS: SeedUser[] = [
     name: 'Ana Torres',
     role: 'USER' as UserRole,
     isActive: true,
+    storageQuota: DEFAULT_STORAGE_QUOTA,
     createdDaysAgo: 65,
     lastLoginDaysAgo: 1,
   },
@@ -116,6 +123,7 @@ export const SEED_USERS: SeedUser[] = [
     name: 'Luis Gómez',
     role: 'USER' as UserRole,
     isActive: true,
+    storageQuota: DEFAULT_STORAGE_QUOTA,
     createdDaysAgo: 64,
     lastLoginDaysAgo: 3,
   },

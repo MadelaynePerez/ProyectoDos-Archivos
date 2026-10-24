@@ -1,3 +1,4 @@
+import { HttpErrorResponse } from '@angular/common/http';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { MatButtonModule } from '@angular/material/button';
@@ -30,12 +31,18 @@ import type {
 } from '../../../core/models/file.model';
 import type { Folder } from '../../../core/models/folder.model';
 import type { ShareResourceType } from '../../../core/models/share.model';
+import { AuthService } from '../../../core/services/auth.service';
 import { FilesService } from '../../../core/services/files.service';
 import { FoldersService } from '../../../core/services/folders.service';
+import { StorageService } from '../../../core/services/storage.service';
 import {
   ConfirmDialogComponent,
   type ConfirmDialogData,
 } from '../../../shared/confirm-dialog/confirm-dialog.component';
+import {
+  EditContentModalComponent,
+  type EditContentModalData,
+} from '../../../shared/edit-content-modal/edit-content-modal.component';
 import {
   DataTableComponent,
   type DataTableAction,
@@ -53,6 +60,11 @@ import {
   type MoveDialogResult,
 } from '../components/move-dialog/move-dialog.component';
 import {
+  SaveFileModalComponent,
+  type SaveFileModalData,
+  type SaveFileModalResult,
+} from '../components/save-file-modal/save-file-modal.component';
+import {
   ShareDialogComponent,
   type ShareDialogData,
 } from '../components/share-dialog/share-dialog.component';
@@ -64,6 +76,11 @@ const RENAME_ACTION: DataTableAction = {
   id: 'rename',
   label: 'Renombrar',
   icon: 'edit',
+};
+const EDIT_CONTENT_ACTION: DataTableAction = {
+  id: 'edit-content',
+  label: 'Editar contenido',
+  icon: 'edit_note',
 };
 const DOWNLOAD_ACTION: DataTableAction = {
   id: 'download',
@@ -96,6 +113,7 @@ const FOLDER_ACTIONS: readonly DataTableAction[] = [
 ];
 const FILE_ACTIONS: readonly DataTableAction[] = [
   RENAME_ACTION,
+  EDIT_CONTENT_ACTION,
   DOWNLOAD_ACTION,
   MOVE_ACTION,
   SHARE_ACTION,
@@ -111,6 +129,8 @@ interface BreadcrumbItem {
 interface ExplorerRow extends DataTableRow {
   _id: string;
   _kind: 'folder' | 'file';
+  /** Solo los archivos propios (o con EDIT) admiten editar contenido. */
+  _canEdit: boolean;
   name: string;
   typeLabel: string;
   size?: number;
@@ -144,6 +164,8 @@ interface ExplorerRow extends DataTableRow {
 export class ListExplorerComponent {
   private readonly foldersService = inject(FoldersService);
   private readonly filesService = inject(FilesService);
+  private readonly storage = inject(StorageService);
+  private readonly auth = inject(AuthService);
   private readonly dialog = inject(MatDialog);
   private readonly snackBar = inject(MatSnackBar);
 
@@ -176,9 +198,19 @@ export class ListExplorerComponent {
   /** La columna de acciones se muestra porque siempre hay acciones posibles. */
   readonly actions = FILE_ACTIONS;
 
-  /** Descargar solo tiene sentido para archivos. */
-  readonly actionsForRow = (row: DataTableRow): readonly DataTableAction[] =>
-    row['_kind'] === 'file' ? FILE_ACTIONS : FOLDER_ACTIONS;
+  /**
+   * Acciones según la fila: las carpetas no se descargan y "Editar contenido"
+   * solo se ofrece en archivos propios o con permiso EDIT.
+   */
+  readonly actionsForRow = (row: DataTableRow): readonly DataTableAction[] => {
+    if (row['_kind'] !== 'file') {
+      return FOLDER_ACTIONS;
+    }
+
+    return row['_canEdit'] === true
+      ? FILE_ACTIONS
+      : FILE_ACTIONS.filter((action) => action.id !== EDIT_CONTENT_ACTION.id);
+  };
 
   /** Solo las carpetas se abren con clic o Enter. */
   readonly isFolderRow = (row: DataTableRow): boolean => row['_kind'] === 'folder';
@@ -342,6 +374,9 @@ export class ListExplorerComponent {
         case 'rename':
           this.renameFile(file);
           break;
+        case 'edit-content':
+          this.editFileContent(file);
+          break;
         case 'download':
           this.downloadFile(file);
           break;
@@ -390,6 +425,60 @@ export class ListExplorerComponent {
       });
   }
 
+  /**
+   * Abre el modal "Nuevo archivo" y crea el archivo de texto en la carpeta
+   * actual. El contenido se envía como Blob dentro del multipart.
+   */
+  createFile(): void {
+    const items = this.breadcrumb();
+    const folderName = items.length > 0 ? items[items.length - 1].name : 'Mis archivos';
+
+    this.dialog
+      .open<SaveFileModalComponent, SaveFileModalData, SaveFileModalResult | null>(
+        SaveFileModalComponent,
+        {
+          data: { folderName },
+          width: '44rem',
+          maxWidth: '95vw',
+        },
+      )
+      .afterClosed()
+      .subscribe((result) => {
+        if (result) {
+          this.uploadNewFile(result);
+        }
+      });
+  }
+
+  /** Construye el Blob y sube el archivo con `POST /api/files`. */
+  private uploadNewFile(result: SaveFileModalResult): void {
+    const extension = result.name.slice(result.name.lastIndexOf('.') + 1).toLocaleLowerCase();
+    const mimeType = extension === 'md' ? 'text/markdown' : 'text/plain';
+
+    // `File` aporta el nombre visible; el contenido real es el Blob del texto.
+    const blob = new Blob([result.content], { type: `${mimeType};charset=utf-8` });
+    const file = new File([blob], result.name, { type: mimeType });
+
+    if (file.size > MAX_UPLOAD_BYTES) {
+      this.showMessage('El archivo no puede superar los 5 MB.');
+      return;
+    }
+
+    this.uploading.set(true);
+    this.filesService
+      .upload(file, this.currentFolderId())
+      .pipe(finalize(() => this.uploading.set(false)))
+      .subscribe({
+        next: (uploaded) => {
+          this.notify(`Archivo "${uploaded.name}" creado.`);
+          // El archivo nuevo ocupa cuota: se actualiza la barra del sidenav.
+          this.storage.refresh();
+          this.reload();
+        },
+        error: (error: unknown) => this.showUploadError(error, 'No se pudo crear el archivo.'),
+      });
+  }
+
   /** Sube el archivo seleccionado a la carpeta actual. */
   onFileSelected(event: Event): void {
     const input = event.target as HTMLInputElement;
@@ -419,9 +508,11 @@ export class ListExplorerComponent {
       .subscribe({
         next: (uploaded) => {
           this.notify(`Archivo "${uploaded.name}" subido.`);
+          // Toda subida incrementa `storageUsed`: se refresca la cuota.
+          this.storage.refresh();
           this.reload();
         },
-        error: (error: unknown) => this.showError(error, 'No se pudo subir el archivo.'),
+        error: (error: unknown) => this.showUploadError(error, 'No se pudo subir el archivo.'),
       });
   }
 
@@ -570,6 +661,70 @@ export class ListExplorerComponent {
     });
   }
 
+  /**
+   * Carga el texto con la descarga y abre el editor. Solo se ofrece en
+   * archivos propios (o con permiso EDIT), porque el backend exige EDIT.
+   */
+  private editFileContent(file: FileItem): void {
+    this.filesService.download(file._id).subscribe({
+      next: (blob) => {
+        blob.text().then(
+          (content) => this.openEditContentModal(file, content),
+          () => this.showMessage('No se pudo leer el contenido del archivo.'),
+        );
+      },
+      error: (error: unknown) =>
+        this.showError(error, 'No se pudo cargar el contenido del archivo.'),
+    });
+  }
+
+  /** Abre el modal con el texto actual y guarda solo si cambió. */
+  private openEditContentModal(file: FileItem, content: string): void {
+    this.dialog
+      .open<EditContentModalComponent, EditContentModalData, string | null>(
+        EditContentModalComponent,
+        {
+          data: { fileName: file.name, content },
+          width: '48rem',
+          maxWidth: '95vw',
+        },
+      )
+      .afterClosed()
+      .subscribe((updated) => {
+        // `null`/`undefined` significan cancelar; el mismo texto no se reenvía.
+        if (updated === null || updated === undefined || updated === content) {
+          return;
+        }
+
+        this.saveFileContent(file, updated);
+      });
+  }
+
+  /** Reemplaza el contenido con `PUT /api/files/:id/content`. */
+  private saveFileContent(file: FileItem, content: string): void {
+    const mimeType = file.extension === 'md' ? 'text/markdown' : 'text/plain';
+
+    // La API recibe multipart; se conserva el nombre y la extensión actuales.
+    const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });
+    const upload = new File([blob], file.name, { type: mimeType });
+
+    if (upload.size > MAX_UPLOAD_BYTES) {
+      this.showMessage('El contenido no puede superar los 5 MB.');
+      return;
+    }
+
+    this.filesService.updateContent(file._id, upload).subscribe({
+      next: (updated) => {
+        this.notify(`Contenido de "${updated.name}" actualizado.`);
+        // Reemplazar contenido ajusta `storageUsed` por la diferencia de tamaño.
+        this.storage.refresh();
+        this.reload();
+      },
+      error: (error: unknown) =>
+        this.showUploadError(error, 'No se pudo guardar el contenido del archivo.'),
+    });
+  }
+
   /** Carga el árbol completo y abre el diálogo con los destinos válidos. */
   private openMoveDialog(item: Folder | FileItem, itemType: 'folder' | 'file'): void {
     this.foldersService.listAll().subscribe({
@@ -645,6 +800,7 @@ export class ListExplorerComponent {
     return {
       _id: folder._id,
       _kind: 'folder',
+      _canEdit: false,
       name: folder.name,
       typeLabel: 'Carpeta',
       createdAt: folder.createdAt,
@@ -655,11 +811,22 @@ export class ListExplorerComponent {
     return {
       _id: file._id,
       _kind: 'file',
+      _canEdit: this.canEditContent(file),
       name: file.name,
       typeLabel: 'Archivo',
       size: file.size,
       createdAt: file.createdAt,
     };
+  }
+
+  /**
+   * En el explorador propio todos los archivos son del usuario. La
+   * comprobación deja la puerta abierta a archivos recibidos con EDIT desde
+   * otras vistas; el backend vuelve a validar el permiso en cada petición.
+   */
+  private canEditContent(file: FileItem): boolean {
+    const user = this.auth.currentUser();
+    return user !== null && file.ownerId === user._id;
   }
 
   private notify(message: string): void {
@@ -669,6 +836,27 @@ export class ListExplorerComponent {
   /** Mensaje informativo para validaciones hechas antes de llamar a la API. */
   private showMessage(message: string): void {
     this.snackBar.open(message, 'Cerrar', { duration: 5000 });
+  }
+
+  /**
+   * Mensaje específico para el 413 de subida, creación y edición de contenido.
+   *
+   * El backend usa el mismo código cuando el archivo supera 5 MB o cuando no
+   * cabe en la cuota. El límite de 5 MB ya se valida en el cliente, así que se
+   * explica el caso de cuota y cómo liberar espacio.
+   */
+  private showUploadError(error: unknown, fallback: string): void {
+    if (error instanceof HttpErrorResponse && error.status === 413) {
+      this.snackBar.open(
+        'Espacio insuficiente: el archivo no cabe en tu cuota de almacenamiento. ' +
+          'Vacía la papelera o pide al administrador que amplíe tu cuota.',
+        'Cerrar',
+        { duration: 8000 },
+      );
+      return;
+    }
+
+    this.showError(error, fallback);
   }
 
   /** Muestra el detalle del backend para 400, 404 y 409 (y otros errores). */

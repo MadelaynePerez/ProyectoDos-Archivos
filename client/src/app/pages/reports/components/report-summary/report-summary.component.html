@@ -1,0 +1,22 @@
+<mat-card appearance="outlined" class="summary-card">
+  <div class="summary-header">
+    <h2>{{ title() }}</h2>
+    <span class="summary-hint">Máximo: {{ maxValue() }} {{ valueLabel() }}</span>
+  </div>
+
+  <div class="bar-list">
+    @for (item of items(); track $index) {
+      <div class="bar-row">
+        <span class="bar-label" [title]="item.label">{{ item.label }}</span>
+        <div
+          class="bar-track"
+          role="img"
+          [attr.aria-label]="item.label + ': ' + item.value + ' ' + valueLabel()"
+        >
+          <span class="bar-fill" [style.width.%]="percent(item.value)"></span>
+        </div>
+        <span class="bar-value">{{ item.value }}</span>
+      </div>
+    }
+  </div>
+</mat-card>

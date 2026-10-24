@@ -8,7 +8,10 @@ export interface User {
   name: string;
   role: UserRole;
   isActive: boolean;
+  /** Bytes ocupados; incluye los archivos que están en la papelera. */
   storageUsed: number;
+  /** Cuota de almacenamiento en bytes (50 MB por defecto). */
+  storageQuota: number;
   lastLoginAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -21,4 +24,9 @@ export interface User {
 export interface UpdateUserRequest {
   role?: UserRole;
   isActive?: boolean;
+  /**
+   * Cuota en bytes. Debe ser un entero positivo y no menor que `storageUsed`;
+   * el backend responde 400 si no se cumple.
+   */
+  storageQuota?: number;
 }

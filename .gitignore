@@ -1,3 +1,9 @@
 node_modules/
 dist/
 .env
+
+# Archivos Markdown: se ignoran todos excepto los README
+*.md
+!README.md
+!**/README.md
+docsApi/

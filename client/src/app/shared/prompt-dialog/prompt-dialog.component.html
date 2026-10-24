@@ -1,6 +1,11 @@
 <h2 mat-dialog-title>{{ data.title }}</h2>
 
-<form (ngSubmit)="submit()">
+<!--
+  Se usa el evento nativo `submit` (con preventDefault) en lugar de `ngSubmit`:
+  este formulario no tiene `[formGroup]`, así que no hay directiva de formularios
+  que emita `ngSubmit` y el botón provocaría un envío nativo de la página.
+-->
+<form (submit)="submit($event)">
   <mat-dialog-content>
     @if (data.message) {
       <p class="dialog-message">{{ data.message }}</p>

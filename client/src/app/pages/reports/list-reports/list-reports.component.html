@@ -1,5 +1,83 @@
-<app-section-placeholder
-  title="Reportes"
-  description="Aquí verás los reportes de archivos, comparticiones y actividad, con filtros de fecha y usuario."
-  icon="bar_chart"
-/>
+<section class="reports-page">
+  <header class="page-header">
+    <div class="page-heading">
+      <h1>Reportes</h1>
+      <p class="page-subtitle">{{ selectedReport().description }}</p>
+      <code class="endpoint">{{ selectedReport().endpoint }}</code>
+    </div>
+
+    <button mat-stroked-button type="button" [disabled]="loading()" (click)="reload()">
+      <mat-icon>refresh</mat-icon>
+      Actualizar
+    </button>
+  </header>
+
+  <mat-card appearance="outlined" class="selector-card">
+    <div class="selector-row">
+      <mat-form-field appearance="outline" subscriptSizing="dynamic" class="report-field">
+        <mat-label>Reporte</mat-label>
+        <mat-icon matPrefix>bar_chart</mat-icon>
+        <mat-select [value]="selectedId()" (selectionChange)="onReportChange($event.value)">
+          @for (group of reportGroups; track group) {
+            <mat-optgroup [label]="group">
+              @for (report of reportsByGroup(group); track report.id) {
+                <mat-option [value]="report.id">{{ report.name }}</mat-option>
+              }
+            </mat-optgroup>
+          }
+        </mat-select>
+      </mat-form-field>
+
+      @if (selectedReport().filters.granularity) {
+        <mat-form-field appearance="outline" subscriptSizing="dynamic" class="granularity-field">
+          <mat-label>Agrupar por</mat-label>
+          <mat-select [value]="granularity()" (selectionChange)="onGranularityChange($event.value)">
+            <mat-option value="day">Día</mat-option>
+            <mat-option value="month">Mes</mat-option>
+          </mat-select>
+        </mat-form-field>
+      }
+    </div>
+  </mat-card>
+
+  @if (showFilters()) {
+    <mat-card appearance="outlined" class="filters-card">
+      <app-filters
+        [showSearch]="false"
+        [showUser]="showUserFilter()"
+        [showDateRange]="showDatesFilter()"
+        [userOptions]="userOptions()"
+        userEmptyLabel="Yo (usuario autenticado)"
+        (filtersChange)="onFiltersChange($event)"
+      />
+    </mat-card>
+  }
+
+  @if (loading()) {
+    <mat-progress-bar mode="indeterminate" aria-label="Cargando reporte" />
+  }
+
+  @if (selectedReport().summary; as summary) {
+    @if (summaryItems().length > 0) {
+      <app-report-summary
+        [title]="summary.title"
+        [valueLabel]="summary.valueLabel"
+        [items]="summaryItems()"
+      />
+    }
+  }
+
+  <mat-card appearance="outlined" class="table-card">
+    <div class="table-header">
+      <h2>Resultados</h2>
+      <span class="row-count">{{ rows().length }} fila(s)</span>
+    </div>
+
+    <app-data-table
+      [columns]="columns()"
+      [rows]="rows()"
+      [pageSize]="10"
+      [emptyMessage]="emptyMessage()"
+    />
+  </mat-card>
+</section>

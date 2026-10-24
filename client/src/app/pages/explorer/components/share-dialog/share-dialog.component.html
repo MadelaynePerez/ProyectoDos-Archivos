@@ -6,7 +6,11 @@
     >.
   </p>
 
-  <form class="share-form" (ngSubmit)="grant()">
+  <!--
+    Evento nativo `submit` en lugar de `ngSubmit`: el formulario no tiene
+    `[formGroup]`, por lo que ninguna directiva emitiría `ngSubmit`.
+  -->
+  <form class="share-form" (submit)="grant($event)">
     <div class="form-row">
       <mat-form-field appearance="outline" subscriptSizing="dynamic">
         <mat-label>Email del destinatario</mat-label>

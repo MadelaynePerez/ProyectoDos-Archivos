@@ -1,5 +1,40 @@
-<app-section-placeholder
-  title="Papelera"
-  description="Aquí podrás restaurar archivos y carpetas o eliminarlos definitivamente."
-  icon="delete"
-/>
+<section class="trash-page">
+  <header class="page-header">
+    <div class="page-heading">
+      <h1>Papelera</h1>
+      <p class="page-subtitle">{{ subtitle() }}</p>
+    </div>
+
+    <div class="header-actions">
+      <button mat-stroked-button type="button" [disabled]="loading() || busy()" (click)="reload()">
+        <mat-icon>refresh</mat-icon>
+        Actualizar
+      </button>
+
+      <button
+        mat-flat-button
+        color="warn"
+        type="button"
+        [disabled]="items().length === 0 || loading() || busy()"
+        (click)="confirmEmpty()"
+      >
+        <mat-icon>delete_sweep</mat-icon>
+        Vaciar papelera
+      </button>
+    </div>
+  </header>
+
+  @if (loading() || busy()) {
+    <mat-progress-bar mode="indeterminate" aria-label="Cargando o actualizando la papelera" />
+  }
+
+  <mat-card appearance="outlined" class="table-card">
+    <app-data-table
+      [columns]="columns"
+      [rows]="rows()"
+      [actions]="actions"
+      [emptyMessage]="emptyMessage"
+      (actionSelected)="onAction($event)"
+    />
+  </mat-card>
+</section>

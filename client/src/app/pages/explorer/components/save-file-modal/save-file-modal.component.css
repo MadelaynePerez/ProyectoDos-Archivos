@@ -1,0 +1,24 @@
+.dialog-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.dialog-message {
+  margin: 0 0 0.75rem;
+  color: var(--mat-sys-on-surface-variant);
+  line-height: 1.5;
+}
+
+.full-width {
+  width: 100%;
+}
+
+/* El área de texto ocupa el ancho del modal y crece en vertical. */
+.content-input {
+  min-height: 12rem;
+  resize: vertical;
+  font-family: 'Roboto Mono', 'Consolas', monospace;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}

@@ -28,6 +28,10 @@ import {
   type DataTableRow,
 } from '../../../shared/data-table/data-table.component';
 import {
+  EditContentModalComponent,
+  type EditContentModalData,
+} from '../../../shared/edit-content-modal/edit-content-modal.component';
+import {
   PromptDialogComponent,
   type PromptDialogData,
 } from '../../../shared/prompt-dialog/prompt-dialog.component';
@@ -43,7 +47,16 @@ const RENAME_ACTION: DataTableAction = {
   label: 'Renombrar',
   icon: 'edit',
 };
-const SHARED_ACTIONS: readonly DataTableAction[] = [DOWNLOAD_ACTION, RENAME_ACTION];
+const EDIT_CONTENT_ACTION: DataTableAction = {
+  id: 'edit-content',
+  label: 'Editar contenido',
+  icon: 'edit_note',
+};
+const SHARED_ACTIONS: readonly DataTableAction[] = [
+  DOWNLOAD_ACTION,
+  EDIT_CONTENT_ACTION,
+  RENAME_ACTION,
+];
 
 /** Nivel de la carpeta compartida que se está explorando. */
 interface BreadcrumbItem {
@@ -119,7 +132,7 @@ export class ListSharedWithMeComponent {
 
   readonly actions = SHARED_ACTIONS;
 
-  /** Descargar solo para archivos; renombrar solo con EDIT. */
+  /** Descargar solo para archivos; editar contenido y renombrar solo con EDIT. */
   readonly actionsForRow = (row: DataTableRow): readonly DataTableAction[] => {
     const actions: DataTableAction[] = [];
 
@@ -127,6 +140,9 @@ export class ListSharedWithMeComponent {
       actions.push(DOWNLOAD_ACTION);
     }
     if (row['access'] === 'EDIT') {
+      if (row['_kind'] === 'file') {
+        actions.push(EDIT_CONTENT_ACTION);
+      }
       actions.push(RENAME_ACTION);
     }
 
@@ -193,6 +209,11 @@ export class ListSharedWithMeComponent {
 
     if (event.action === 'download' && event.row['_kind'] === 'file') {
       this.downloadFile(id, name);
+      return;
+    }
+
+    if (event.action === 'edit-content' && event.row['_kind'] === 'file') {
+      this.editFileContent(event.row);
       return;
     }
 
@@ -317,6 +338,74 @@ export class ListSharedWithMeComponent {
         this.notify(`Descarga de "${name}" iniciada.`);
       },
       error: (error: unknown) => this.showError(error, 'No se pudo descargar el archivo.'),
+    });
+  }
+
+  /**
+   * Carga el texto con la descarga y abre el editor. Solo se ofrece con
+   * permiso EDIT, que es el que exige `PUT /api/files/:id/content`.
+   */
+  private editFileContent(row: DataTableRow): void {
+    if (this.currentFolderId() === null) {
+      const share = this.shares().find((item) => item._id === String(row['_shareId']));
+      if (!share || share.resourceType !== 'FILE') {
+        return;
+      }
+      this.downloadAndEditContent(share.resourceId, share.resourceName);
+      return;
+    }
+
+    this.downloadAndEditContent(String(row['_id']), String(row['name']));
+  }
+
+  private downloadAndEditContent(fileId: string, fileName: string): void {
+    this.filesService.download(fileId).subscribe({
+      next: (blob) => {
+        blob.text().then(
+          (content) => this.openEditContentModal(fileId, fileName, content),
+          () => this.showMessage('No se pudo leer el contenido del archivo.'),
+        );
+      },
+      error: (error: unknown) =>
+        this.showError(error, 'No se pudo cargar el contenido del archivo.'),
+    });
+  }
+
+  /** Abre el editor y guarda solo si el texto cambió. */
+  private openEditContentModal(fileId: string, fileName: string, content: string): void {
+    this.dialog
+      .open<EditContentModalComponent, EditContentModalData, string | null>(
+        EditContentModalComponent,
+        {
+          data: { fileName, content },
+          width: '48rem',
+          maxWidth: '95vw',
+        },
+      )
+      .afterClosed()
+      .subscribe((updated) => {
+        if (updated === null || updated === undefined || updated === content) {
+          return;
+        }
+
+        this.saveContent(fileId, fileName, updated);
+      });
+  }
+
+  /** Reemplaza el contenido conservando el nombre y la extensión actuales. */
+  private saveContent(fileId: string, fileName: string, content: string): void {
+    const extension = fileName.slice(fileName.lastIndexOf('.') + 1).toLocaleLowerCase();
+    const mimeType = extension === 'md' ? 'text/markdown' : 'text/plain';
+    const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });
+    const file = new File([blob], fileName, { type: mimeType });
+
+    this.filesService.updateContent(fileId, file).subscribe({
+      next: (updated) => {
+        this.notify(`Contenido de "${updated.name}" actualizado.`);
+        this.reloadCurrentView();
+      },
+      error: (error: unknown) =>
+        this.showError(error, 'No se pudo guardar el contenido del archivo.'),
     });
   }
 
@@ -447,6 +536,11 @@ export class ListSharedWithMeComponent {
 
   private notify(message: string): void {
     this.snackBar.open(message, 'Cerrar', { duration: 3500 });
+  }
+
+  /** Mensaje informativo para fallos de lectura detectados en el cliente. */
+  private showMessage(message: string): void {
+    this.snackBar.open(message, 'Cerrar', { duration: 5000 });
   }
 
   /** Mensajes claros para 400/404 y demás errores del backend. */

@@ -10,7 +10,7 @@ import {
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatMenuModule } from '@angular/material/menu';
-import { MatPaginator, MatPaginatorModule } from '@angular/material/paginator';
+import { MatPaginator, MatPaginatorModule, type PageEvent } from '@angular/material/paginator';
 import { MatTableDataSource, MatTableModule } from '@angular/material/table';
 
 /** Formatos soportados por las celdas de la tabla. */
@@ -50,13 +50,7 @@ export interface DataTableActionEvent {
  */
 @Component({
   selector: 'app-data-table',
-  imports: [
-    MatTableModule,
-    MatPaginatorModule,
-    MatButtonModule,
-    MatIconModule,
-    MatMenuModule,
-  ],
+  imports: [MatTableModule, MatPaginatorModule, MatButtonModule, MatIconModule, MatMenuModule],
   templateUrl: './data-table.component.html',
   styleUrl: './data-table.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -72,9 +66,7 @@ export class DataTableComponent {
   readonly actions = input<readonly DataTableAction[]>([]);
 
   /** Permite devolver un subconjunto de acciones según la fila. */
-  readonly actionsForRow = input<
-    ((row: DataTableRow) => readonly DataTableAction[]) | null
-  >(null);
+  readonly actionsForRow = input<((row: DataTableRow) => readonly DataTableAction[]) | null>(null);
 
   /** Indica qué filas se pueden abrir con clic o con Enter. */
   readonly rowClickable = input<(row: DataTableRow) => boolean>(() => false);
@@ -85,12 +77,30 @@ export class DataTableComponent {
   /** Texto cuando no hay filas. */
   readonly emptyMessage = input('No hay datos para mostrar.');
 
-  /** Paginación Material. */
+  /**
+   * Paginación Material.
+   *
+   * En modo local (por defecto) la tabla pagina las filas recibidas. En modo
+   * servidor la pantalla ya entrega solo la página actual y la tabla se limita
+   * a mostrar el paginador con el total informado por la API.
+   */
   readonly pageSize = input(10);
   readonly pageSizeOptions = input<readonly number[]>([5, 10, 25, 50]);
 
+  /** Activa la paginación controlada por el servidor (`page`/`limit`). */
+  readonly serverSide = input(false);
+
+  /** Total de registros del servidor; obligatorio en modo servidor. */
+  readonly total = input<number | null>(null);
+
+  /** Página actual (base 0) cuando la paginación la controla el servidor. */
+  readonly pageIndex = input(0);
+
   /** Emite la acción elegida junto con la fila completa. */
   readonly actionSelected = output<DataTableActionEvent>();
+
+  /** Emite cada cambio de página o de tamaño para que el padre recargue. */
+  readonly pageChange = output<PageEvent>();
 
   /** Emite la fila abierta cuando la pantalla la marca como navegable. */
   readonly rowSelected = output<DataTableRow>();
@@ -108,10 +118,11 @@ export class DataTableComponent {
 
   constructor() {
     // Sincroniza las filas recibidas con el DataSource y conecta el paginador
-    // en cuanto la vista lo crea.
+    // en cuanto la vista lo crea. En modo servidor no se conecta: si Material
+    // paginara otra vez, recortaría la página que ya devolvió la API.
     effect(() => {
       this.dataSource.data = [...this.rows()];
-      this.dataSource.paginator = this.paginator() ?? null;
+      this.dataSource.paginator = this.serverSide() ? null : (this.paginator() ?? null);
     });
   }
 
@@ -134,9 +145,7 @@ export class DataTableComponent {
       return '—';
     }
     const date = value instanceof Date ? value : new Date(String(value));
-    return Number.isNaN(date.getTime())
-      ? String(value)
-      : this.dateFormatter.format(date);
+    return Number.isNaN(date.getTime()) ? String(value) : this.dateFormatter.format(date);
   }
 
   /** Tamaños en bytes con unidad legible (B, KB, MB). */
@@ -169,6 +178,11 @@ export class DataTableComponent {
   /** Notifica al padre qué acción se eligió sobre qué fila. */
   protected emitAction(action: DataTableAction, row: DataTableRow): void {
     this.actionSelected.emit({ action: action.id, row });
+  }
+
+  /** Reenvía el cambio de página para que la pantalla consulte a la API. */
+  protected onPageChange(event: PageEvent): void {
+    this.pageChange.emit(event);
   }
 
   /** Acciones que corresponden a una fila concreta. */

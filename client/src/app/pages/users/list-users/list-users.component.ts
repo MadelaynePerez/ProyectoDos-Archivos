@@ -11,6 +11,7 @@ import { finalize } from 'rxjs';
 import { apiErrorMessage } from '../../../core/api/api-error';
 import type { UpdateUserRequest, User, UserRole } from '../../../core/models/user.model';
 import { AuthService } from '../../../core/services/auth.service';
+import { StorageService } from '../../../core/services/storage.service';
 import { UsersService } from '../../../core/services/users.service';
 import {
   ConfirmDialogComponent,
@@ -26,12 +27,13 @@ import {
 import {
   SaveUserModalComponent,
   type SaveUserModalData,
+  type SaveUserModalResult,
 } from '../components/save-user-modal/save-user-modal.component';
 
 /** Acciones disponibles en el menú de cada usuario. */
-const CHANGE_ROLE_ACTION: DataTableAction = {
-  id: 'change-role',
-  label: 'Cambiar rol',
+const EDIT_USER_ACTION: DataTableAction = {
+  id: 'edit-user',
+  label: 'Editar rol y cuota',
   icon: 'manage_accounts',
 };
 const ACTIVATE_ACTION: DataTableAction = {
@@ -53,6 +55,8 @@ interface UserRow extends DataTableRow {
   email: string;
   role: UserRole;
   status: string;
+  /** Cuota total y espacio usado, ambos en bytes (los formatea la tabla). */
+  storageQuota: number;
   storageUsed: number;
   createdAt: string;
   isActive: boolean;
@@ -81,6 +85,7 @@ interface UserRow extends DataTableRow {
 })
 export class ListUsersComponent {
   private readonly usersService = inject(UsersService);
+  private readonly storage = inject(StorageService);
   private readonly auth = inject(AuthService);
   private readonly dialog = inject(MatDialog);
   private readonly snackBar = inject(MatSnackBar);
@@ -95,18 +100,19 @@ export class ListUsersComponent {
     { key: 'email', label: 'Correo' },
     { key: 'role', label: 'Rol', format: 'badge' },
     { key: 'status', label: 'Estado', format: 'badge' },
-    { key: 'storageUsed', label: 'Almacenamiento', format: 'size' },
+    { key: 'storageQuota', label: 'Cuota', format: 'size' },
+    { key: 'storageUsed', label: 'Usado', format: 'size' },
     { key: 'createdAt', label: 'Fecha de alta', format: 'date' },
   ];
 
-  /** La tabla muestra acciones porque siempre se puede cambiar el rol. */
-  readonly actions: readonly DataTableAction[] = [CHANGE_ROLE_ACTION, DEACTIVATE_ACTION];
+  /** La tabla muestra acciones porque siempre se puede editar rol y cuota. */
+  readonly actions: readonly DataTableAction[] = [EDIT_USER_ACTION, DEACTIVATE_ACTION];
 
   /** Activar o desactivar según el estado actual de la fila. */
   readonly actionsForRow = (row: DataTableRow): readonly DataTableAction[] =>
     row['isActive'] === true
-      ? [CHANGE_ROLE_ACTION, DEACTIVATE_ACTION]
-      : [CHANGE_ROLE_ACTION, ACTIVATE_ACTION];
+      ? [EDIT_USER_ACTION, DEACTIVATE_ACTION]
+      : [EDIT_USER_ACTION, ACTIVATE_ACTION];
 
   /** Filas con etiquetas legibles para los badges de la tabla compartida. */
   readonly rows = computed<readonly UserRow[]>(() =>
@@ -116,6 +122,7 @@ export class ListUsersComponent {
       email: user.email,
       role: user.role,
       status: user.isActive ? 'Activo' : 'Inactivo',
+      storageQuota: user.storageQuota,
       storageUsed: user.storageUsed,
       createdAt: user.createdAt,
       isActive: user.isActive,
@@ -152,8 +159,8 @@ export class ListUsersComponent {
     }
 
     switch (event.action) {
-      case 'change-role':
-        this.openRoleModal(user);
+      case 'edit-user':
+        this.openEditModal(user);
         break;
       case 'activate':
         this.updateUser(user, { isActive: true }, `Cuenta de ${user.name} activada.`);
@@ -164,28 +171,55 @@ export class ListUsersComponent {
     }
   }
 
-  /** Abre el modal de rol y aplica el cambio si el usuario confirma. */
-  private openRoleModal(user: User): void {
+  /**
+   * Abre el modal que permite cambiar el rol y la cuota (en MB).
+   * Solo se envía el PATCH si alguno de los dos valores cambió.
+   */
+  private openEditModal(user: User): void {
     const data: SaveUserModalData = { user };
 
     this.dialog
-      .open<SaveUserModalComponent, SaveUserModalData, UserRole | null>(SaveUserModalComponent, {
-        data,
-        width: '28rem',
-        maxWidth: '95vw',
-      })
+      .open<SaveUserModalComponent, SaveUserModalData, SaveUserModalResult | null>(
+        SaveUserModalComponent,
+        {
+          data,
+          width: '30rem',
+          maxWidth: '95vw',
+        },
+      )
       .afterClosed()
-      .subscribe((role) => {
-        if (!role || role === user.role) {
+      .subscribe((result) => {
+        if (!result) {
           return;
         }
 
-        this.updateUser(
-          user,
-          { role },
-          `Rol de ${user.name} actualizado a ${this.roleLabel(role)}.`,
-        );
+        const changes: UpdateUserRequest = {};
+        if (result.role !== user.role) {
+          changes.role = result.role;
+        }
+        if (result.storageQuota !== user.storageQuota) {
+          changes.storageQuota = result.storageQuota;
+        }
+
+        if (changes.role === undefined && changes.storageQuota === undefined) {
+          return;
+        }
+
+        this.updateUser(user, changes, this.editSuccessMessage(user, changes));
       });
+  }
+
+  /** Resume en el snackbar qué campos se modificaron. */
+  private editSuccessMessage(user: User, changes: UpdateUserRequest): string {
+    const details: string[] = [];
+    if (changes.role !== undefined) {
+      details.push(`rol ${this.roleLabel(changes.role)}`);
+    }
+    if (changes.storageQuota !== undefined) {
+      details.push(`cuota ${this.formatMb(changes.storageQuota)}`);
+    }
+
+    return `Datos de ${user.name} actualizados (${details.join(' y ')}).`;
   }
 
   /** Desactivar siempre pide confirmación (no borra recursos ni historial). */
@@ -230,6 +264,12 @@ export class ListUsersComponent {
           );
           this.notify(successMessage);
           this.syncCurrentSession(updated);
+
+          // Si el ADMIN cambió su propia cuota, la barra del sidenav debe
+          // reflejar el nuevo límite sin esperar a la siguiente operación.
+          if (changes.storageQuota !== undefined && this.auth.currentUser()?._id === updated._id) {
+            this.storage.refresh();
+          }
         },
         error: (error: unknown) => {
           this.showError(error, 'No se pudo actualizar el usuario.');
@@ -282,6 +322,11 @@ export class ListUsersComponent {
   /** Etiqueta legible del rol para los mensajes de éxito. */
   private roleLabel(role: UserRole): string {
     return role === 'ADMIN' ? 'Administrador' : 'Usuario';
+  }
+
+  /** Convierte bytes a MB con un decimal para los mensajes de éxito. */
+  private formatMb(bytes: number): string {
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }
 
   private notify(message: string): void {
